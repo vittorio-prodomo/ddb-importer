@@ -134,6 +134,7 @@ export { default as Light } from "./Light";
 export { default as Longstrider } from "./Longstrider";
 export { default as MageArmor } from "./MageArmor";
 export { default as MageHand } from "./MageHand";
+export { default as MagicMissile } from "./MagicMissile";
 export { default as MagicWeapon } from "./MagicWeapon";
 export { default as MajorImage } from "./MajorImage";
 export { default as MassSuggestion } from "./MassSuggestion";
