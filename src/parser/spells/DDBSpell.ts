@@ -413,9 +413,10 @@ export default class DDBSpell extends DDBActivityFactoryMixin<"spell"> {
         this.data.system.prepared = CONFIG.DND5E.spellPreparationStates.unprepared.value;
       } else if (always) {
         // these spells are always prepared, and have a limited use that's
-        // picked up by getUses() later
-        // this was changed to "atwill"
-        this.data.system.method = "atwill";
+        // picked up by getUses() later.
+        // Normalize feat/background grants to "innate" (consistent with race grants);
+        // leave other sources (e.g. Warlock invocations) as "atwill".
+        this.data.system.method = ["feat", "background"].includes(this.lookup) ? "innate" : "atwill";
         this.data.system.prepared = CONFIG.DND5E.spellPreparationStates.always.value;
       } else if (this.spellData.usesSpellSlot) {
         this.data.system.method = this.onlyPactMagic ? "pact" : "spell";
@@ -423,7 +424,7 @@ export default class DDBSpell extends DDBActivityFactoryMixin<"spell"> {
 
       if (!this.spellData.usesSpellSlot && ["classFeature", "subclassFeature", "feat"].includes(this.lookup)) {
         if (this.spellData.alwaysPrepared) {
-          this.data.system.method = "atwill";
+          this.data.system.method = this.lookup === "feat" ? "innate" : "atwill";
           this.data.system.prepared = CONFIG.DND5E.spellPreparationStates.always.value;
         }
       }
