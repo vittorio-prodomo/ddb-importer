@@ -287,26 +287,7 @@ export default class CharacterSpellFactory {
       });
     const duplicateItem = this._generated.class[duplicateSpell];
     if (!duplicateItem) {
-      // Cross-bucket dedup: when a spell is granted by both a lineage/feat AND the
-      // class list, handleGrantedSpells already created an always-prepared slot copy
-      // (e.g. "GrLongstrider" in _generated.race). Skip the redundant class copy in
-      // that case rather than leaving a duplicate unprepared entry.
-      const parsedOriginalName = parsedSpell.flags.ddbimporter.originalName ?? parsedSpell.name;
-      const crossBucketSlotCopy = Object.entries(this._generated).some(([bucket, spells]) => bucket !== "class"
-        && Array.isArray(spells)
-        && spells.some((existingSpell) => {
-          const existingOriginalName = existingSpell.flags.ddbimporter.originalName ?? existingSpell.name;
-          const legacyMatch = (parsedSpell.flags.ddbimporter.is2014 ?? true) === (existingSpell.flags.ddbimporter.is2014 ?? true);
-          return existingOriginalName === parsedOriginalName
-            && legacyMatch
-            && existingSpell.system.method === "spell"
-            && existingSpell.system.prepared === CONFIG.DND5E.spellPreparationStates.always.value;
-        }));
-      if (crossBucketSlotCopy) {
-        logger.debug(`Skipping redundant class spell ${parsedOriginalName}: an always-prepared slot copy already exists from another source.`);
-      } else {
-        this._generated.class.push(parsedSpell);
-      }
+      this._generated.class.push(parsedSpell);
     } else if (spell.alwaysPrepared || parsedSpell.system.method === "always"
       || (spell.alwaysPrepared === duplicateItem.alwaysPrepared
         && parsedSpell.system.method === duplicateItem.system.method
@@ -319,6 +300,45 @@ export default class CharacterSpellFactory {
       // we'll emit a console message if it doesn't match this case for future debugging
       logger.info(`Duplicate Spell ${spell.definition.name} detected in class ${classInfo.definition.name}.`);
     }
+  }
+
+  // Cross-bucket dedup. A spell granted by a lineage/feat AND present on the class
+  // list yields both an always-prepared slot copy (created by handleGrantedSpells,
+  // e.g. in _generated.race) and a redundant unprepared class-list entry. This can't
+  // be decided inside _processClassSpell: that runs during generateClassSpells(),
+  // BEFORE the race/feat grants exist, so the non-class buckets are still empty there.
+  // Run it here, once every _generated bucket is populated, dropping the redundant
+  // unprepared class copy when an always-prepared slot copy exists in another bucket.
+  _dedupRedundantClassSpells() {
+    const alwaysValue = CONFIG.DND5E.spellPreparationStates.always.value;
+    const unpreparedValue = CONFIG.DND5E.spellPreparationStates.unprepared.value;
+
+    const hasAlwaysPreparedSlotCopy = (target) => {
+      const targetName = target.flags.ddbimporter.originalName ?? target.name;
+      return Object.values(this._generated).some((spells) =>
+        Array.isArray(spells)
+        && spells.some((other) => {
+          if (other === target) return false;
+          const otherName = other.flags.ddbimporter.originalName ?? other.name;
+          const legacyMatch = (target.flags.ddbimporter.is2014 ?? true) === (other.flags.ddbimporter.is2014 ?? true);
+          return otherName === targetName
+            && legacyMatch
+            && other.system.method === "spell"
+            && other.system.prepared === alwaysValue;
+        }),
+      );
+    };
+
+    this._generated.class = this._generated.class.filter((spell) => {
+      const redundant = spell.system.method === "spell"
+        && spell.system.prepared === unpreparedValue
+        && hasAlwaysPreparedSlotCopy(spell);
+      if (redundant) {
+        const name = spell.flags.ddbimporter.originalName ?? spell.name;
+        logger.debug(`Removing redundant unprepared class spell ${name}: an always-prepared slot copy exists from another source.`);
+      }
+      return !redundant;
+    });
   }
 
   filterSpellsByAllowedCategories(spells) {
@@ -935,6 +955,10 @@ export default class CharacterSpellFactory {
 
     // background spells are handled slightly differently
     await this.generateBackgroundSpells();
+
+    // Cross-bucket dedup must run AFTER every _generated bucket is populated (the
+    // class list is processed before race/feat grants exist — see the method below).
+    this._dedupRedundantClassSpells();
 
     await this._setCompendiumSource();
 
