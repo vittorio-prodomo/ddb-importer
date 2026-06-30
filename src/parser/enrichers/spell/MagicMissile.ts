@@ -29,4 +29,24 @@ export default class MagicMissile extends DDBEnricherData {
       },
     };
   }
+
+  // The dart COUNT must live at the ITEM-level target.affects.count: the damage
+  // activity has target.override=false, so dnd5e reads the count from the item
+  // (matching the official dnd5e.spells24 build); a count set only on the activity
+  // is ignored. addDocumentOverride merges override.data via foundry mergeObject,
+  // which expands NESTED keys (not dotted) — so the data must be nested.
+  get override(): IDDBOverrideData | null {
+    return {
+      data: {
+        system: {
+          target: {
+            affects: {
+              count: "2 + @item.level", // 3 darts at L1, +1 per upcast level
+              type: "creature",
+            },
+          },
+        },
+      },
+    };
+  }
 }
