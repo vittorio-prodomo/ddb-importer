@@ -1,6 +1,6 @@
 # Re-import-durable automation — design spec
 
-**Date:** 2026-07-02 · **Status: PARKED** — design sections approved by Vittorio in discussion, implementation deferred in favor of the Foundry-autonomy tooling project. Re-review at resume, then run writing-plans.
+**Date:** 2026-07-02 · **Status: IMPLEMENTED 2026-07-02** — executed via `docs/superpowers/plans/2026-07-02-reimport-durable-automation.md`; verification evidence summarized at the end of this doc. Two design-premise corrections discovered live: CPR ships a *non-automated* Lucky shell (opted out per-item at parse), and Portent arrives via a CPR-fork GPS-registry alias, not directly (CPR 1.5.35's registry predates GPS Portent and GPS never ported it to the `*-2024` packs).
 
 ## Problem
 
@@ -54,4 +54,49 @@ Generic snapshot/restore and the re-apply-registry approach (rejected for now; r
 
 ## Branch
 
-`feat/reimport-durable-automation` off `fix/import-quirks` (ddb-importer fork). CPR / GPS / Argon forks unchanged.
+`feat/reimport-durable-automation` off `fix/import-quirks` (ddb-importer fork). ~~CPR / GPS / Argon forks unchanged.~~ **As-built correction:** the CPR fork gained one data-registry commit (`feat/gps-registry-modern-aliases`, 586dba8) — see Rollout/Evidence below. GPS / Argon untouched.
+
+## Rollout (real campaign world)
+
+Per-world/per-user config only — no code. In the campaign world:
+- For EVERY user who runs imports (client-scoped settings): enable
+  `character-update-policy-use-chris-premades` + `character-update-policy-add-midi-effects`
+  (the import-window checkboxes set them).
+- Once (world-scoped): `no-item-macros = false`, `embed-macros = true`.
+- Recreate the **"Portent Refresh"** world macro there (bridge `create-macro` upsert; source in
+  the dev world) — click after the Diviner's long rest (GPS's DAE-off refresh linkage doesn't
+  fire under DAE v13).
+- Then re-import each PC once. The `LuckyDisadvantage` world macro is retired (the feat is
+  self-contained); do not recreate it.
+- The agent client's DDB cobalt cookie lives in `~/.config/foundry-claude/agent.env`
+  (`DDB_COBALT_COOKIE`) — refresh it when the DDB session rotates.
+
+## Verification evidence (2026-07-02, executed via the autonomy stack, agent as sole GM)
+
+- **WS1:** fresh imports of all 4 PCs with premade-at-import on. MM = CPR fork item incl.
+  `flags.enhancedcombathud.stackTargets` (survived the wholesale flag merge as predicted);
+  Protection = CPR `identifier: "protection"` (DDB parses the style as plain "Protection" —
+  no name-override contingency needed); Portent = GPS via the registry alias. Collateral swaps
+  sane (Nigel 43 / Xender 21 / Nahuel 40 / Warpey 45 items).
+- **WS2:** Lucky enricher output exact on import (2 transfer effects; 5 `optional.Lucky.*`
+  changes; `onUseMacroName = "ItemMacro,isPreAttacked"`; macro source embedded at
+  `flags.dae.macro`; uses `@prof` → 2/2 lr). Functional with the world macro DELETED:
+  advantage reroll-kh prompt (points 2→1), disadvantage DialogV2 via the embedded ItemMacro →
+  `2d20dis` kept-lower + `advantageMode: -1` (points 1→0), no prompt at 0 points — the
+  flagged target-side ItemMacro-rewrite risk is CONFIRMED resolved.
+- **MM functional:** auto-distribute path (3 targets = 3 darts → one bolt each, no dialog,
+  slot consumed). The BG3 on-canvas picker is the Argon-HUD-click flow (not reachable from a
+  bare API cast) — already live-verified in the BG3 project; the re-import-relevant item
+  wiring is what this spec covers, and it's green.
+- **Portent functional (absorbed live-test):** roll+store (whispered pair written into the item
+  description), consume dialog (picked a die, it burned). Finding: the refresh-at-long-rest
+  linkage (DAE "off" pass on the item-owned transfer effect) does NOT fire under DAE v13 —
+  pre-existing GPS×DAE gap, worked around with the "Portent Refresh" world macro (re-import-safe).
+- **Protection functional (absorbed live-test):** adjacent-ally attack → CPR reaction dialog →
+  `2d20dis` [19 discarded, 11 kept], attribution "Protection: Protected - Grants Disadvantage
+  Attack (All) (Warpey)", "Reaction used" marker on Xender.
+- **Durability acceptance:** UPDATE-mode re-import of Nigel → every WS2/WS1 assert still green.
+  Zero hand-fixing.
+- **Regression:** Warpey HM dual-mode + clean Favored Enemy intact. **Open finding:** Longstrider
+  count is 3 (expected 2) — the unprepared class copy survives the quirk-#4 dedup; reproduced
+  with premades OFF (parser-side, not the CPR pass); cosmetic; debug separately.
