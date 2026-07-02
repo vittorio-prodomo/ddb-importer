@@ -22,12 +22,13 @@ const lucky = me.items.find((i) => i.type === "feat" && i.system?.identifier ===
 const remaining = lucky?.system?.uses?.value ?? 0;
 if (!lucky || remaining <= 0) return; // out of Luck Points -> no prompt
 
+const esc = foundry.utils.escapeHTML;
 const attacker = wf.actor?.name ?? "the attacker";
 const ok = await foundry.applications.api.DialogV2.confirm({
   window: { title: "Lucky" },
   content:
-    `<p><b>${me.name}</b>: spend 1 Luck Point to impose <b>Disadvantage</b> on ` +
-    `${attacker}'s attack roll?</p><p><i>${remaining} Luck Point(s) remaining.</i></p>`,
+    `<p><b>${esc(me.name)}</b>: spend 1 Luck Point to impose <b>Disadvantage</b> on ` +
+    `${esc(attacker)}'s attack roll?</p><p><i>${remaining} Luck Point(s) remaining.</i></p>`,
   modal: true,
   rejectClose: false,
 });
