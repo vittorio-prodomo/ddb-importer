@@ -47,7 +47,7 @@
   "scripts": [
     "./vendor/zipjs/zip-fs.js"
   ],
-  "esmodules": ["dist/main.mjs"],
+  "esmodules": ["dev-loader.mjs"],
   "styles": [
     "./css/default.css",
     "./css/import.css",
