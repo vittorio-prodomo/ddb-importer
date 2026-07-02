@@ -303,19 +303,23 @@ export default class CharacterSpellFactory {
   }
 
   // Cross-bucket dedup. A spell granted by a lineage/feat AND present on the class
-  // list yields both an always-prepared slot copy (created by handleGrantedSpells,
-  // e.g. in _generated.race) and a redundant unprepared class-list entry. This can't
-  // be decided inside _processClassSpell: that runs during generateClassSpells(),
-  // BEFORE the race/feat grants exist, so the non-class buckets are still empty there.
-  // Run it here, once every _generated bucket is populated, dropping the redundant
-  // unprepared class copy when an always-prepared slot copy exists in another bucket.
+  // list yields both an always-prepared slot copy and a redundant unprepared
+  // class-list entry. This can't be decided inside _processClassSpell: that runs
+  // during generateClassSpells(), BEFORE the race/feat grants exist, so the
+  // non-class buckets are still empty there. Run it here, once every bucket is
+  // populated, dropping the redundant unprepared class copy when an always-prepared
+  // slot copy exists in another bucket. The slot copy can live in _generated
+  // (synthesized Gr copy from handleGrantedSpells) OR in _granted: when DDB exports
+  // the always-prepared copy as its own second race/feat entry (e.g. 2024 Wood Elf
+  // Longstrider), the length===1 gate skips Gr-synthesis and only the natural
+  // _granted entry exists — so both collections must be scanned.
   _dedupRedundantClassSpells() {
     const alwaysValue = CONFIG.DND5E.spellPreparationStates.always.value;
     const unpreparedValue = CONFIG.DND5E.spellPreparationStates.unprepared.value;
 
     const hasAlwaysPreparedSlotCopy = (target) => {
       const targetName = target.flags.ddbimporter.originalName ?? target.name;
-      return Object.values(this._generated).some((spells) =>
+      return [...Object.values(this._generated), ...Object.values(this._granted)].some((spells) =>
         Array.isArray(spells)
         && spells.some((other) => {
           if (other === target) return false;
