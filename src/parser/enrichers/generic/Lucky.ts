@@ -24,9 +24,21 @@ export default class Lucky extends DDBEnricherData {
       max: this.is2014 ? "3" : "@prof",
       period: "lr",
     });
-    return {
+    const override: IDDBOverrideData = {
       uses,
     };
+    if (!this.is2014) {
+      // The 2024 build below (optional-bonus + ItemMacro effects) supersedes
+      // CPR's non-automated Lucky shell — keep premade-at-import off this item.
+      override.data = {
+        flags: {
+          ddbimporter: {
+            ignoreItemForChrisPremades: true,
+          },
+        },
+      };
+    }
+    return override;
   }
 
   get itemMacro(): IDDBItemMacro | null {
