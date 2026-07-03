@@ -35,8 +35,12 @@ const ok = await foundry.applications.api.DialogV2.confirm({
 if (!ok) return;
 
 // Impose disadvantage on the pending attack (read by checkAttackAdvantage, post-reset).
+// disadvantageReason gives the attack card a named attribution ("DIS: Lucky …") instead of
+// the generic "Workflow Options"; it is honoured by our MidiQoL fork's checkAttackAdvantage
+// (falls back to the generic label on stock MidiQoL, so this line is harmless there).
 wf.workflowOptions = wf.workflowOptions ?? {};
 wf.workflowOptions.disadvantage = true;
+wf.workflowOptions.disadvantageReason = `Lucky — ${me.name} spent a Luck Point`;
 
 // Spend one Luck Point.
 await lucky.update({ "system.uses.spent": (lucky.system?.uses?.spent ?? 0) + 1 });
