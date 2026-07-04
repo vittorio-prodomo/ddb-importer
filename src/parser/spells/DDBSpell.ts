@@ -1070,6 +1070,16 @@ export default class DDBSpell extends DDBActivityFactoryMixin<"spell"> {
     this._generateRange();
     this._generateTarget();
     this._generateUses();
+    // Free-cast copies (2024 lineage/feat grants: innate Longstrider, Faerie Fire,
+    // Healing Word, ...) consume their own limited-use pool via itemUses consumption
+    // (DDBSpellActivity._generateConsumption keys on spellData.limitedUse). CPR
+    // premades are built for the slot-cast copy: the premade swap replaces
+    // system.activities wholesale and stomps that wiring, so the free cast would
+    // consume nothing. Opt these copies out of the swap (honoured in
+    // ChrisPremadesHelper.findAndUpdate); the slot copy still gets its premade.
+    if (this.spellData.limitedUse) {
+      foundry.utils.setProperty(this.data, "flags.ddbimporter.ignoreItemForChrisPremades", true);
+    }
     this.#generateHealingParts(); // used in activity
 
     await this._generateSummons();
