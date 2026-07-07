@@ -500,6 +500,25 @@ export default class CharacterSpellFactory {
   async generateSpecialClassSpells() {
     for (const spell of this.ddb.character.spells.class) {
       if (!spell.definition) continue;
+
+      // Skip feature-granted class spells the character already knows in their spellbook.
+      // 2024 wizard "[School] Savant" features "add spells to your spellbook for free":
+      // DDB lists those spells BOTH in classSpells (as known, prepared spellbook spells)
+      // AND redundantly here as feature-granted, where the block below force-marks them
+      // always-prepared (see ~40 lines down) — contradicting RAW. generateClassSpells has
+      // already imported the authoritative spellbook copy (prepared normally), so drop
+      // this redundant copy. Keyed on the spell definition id + countsAsKnownSpell so
+      // genuine always-prepared grants (which are NOT known spellbook spells) are
+      // unaffected.
+      const knownInSpellbook = this.ddb.character.classSpells.some((cls) =>
+        cls.spells?.some((known) =>
+          known.definition?.id === spell.definition.id && known.countsAsKnownSpell),
+      );
+      if (knownInSpellbook) {
+        logger.debug(`Skipping feature-granted ${spell.definition.name}: already a known spellbook spell; keeping the prepared spellbook copy.`);
+        continue;
+      }
+
       // If the spell has an ability attached, use that
       let spellCastingAbility;
       const featureId = DDBDataUtils.determineActualFeatureId(this.ddb, spell.componentId);
