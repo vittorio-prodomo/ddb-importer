@@ -321,7 +321,9 @@ export default class EffectGenerator {
   _addSenseBonus() {
     const senses = ["darkvision", "blindsight", "tremorsense", "truesight"];
 
+    const senseSummaries: string[] = [];
     senses.forEach((sense) => {
+      const senseLabel = sense.charAt(0).toUpperCase() + sense.slice(1);
       const base = this.grantedModifiers
         .filter((modifier) => modifier.type === "set-base" && modifier.subType === sense)
         .map((mod) => parseInt(String(mod.value)));
@@ -332,6 +334,7 @@ export default class EffectGenerator {
           this.effect.changes.push(ChangeHelper.upgradeChange(Math.max(...base), 10, "ATL.sight.range"));
           this.effect.changes.push(ChangeHelper.atlChange("ATL.sight.visionMode", CONST.ACTIVE_EFFECT_MODES.OVERRIDE, sense, 5));
         }
+        senseSummaries.push(`${senseLabel} ${Math.max(...base)} ft.`);
       }
       const bonus = this.grantedModifiers
         .filter((modifier) => modifier.type === "sense" && modifier.subType === sense)
@@ -343,8 +346,14 @@ export default class EffectGenerator {
           this.effect.changes.push(ChangeHelper.unsignedAddChange(bonus, 20, "ATL.sight.range"));
           this.effect.changes.push(ChangeHelper.atlChange("ATL.sight.visionMode", CONST.ACTIVE_EFFECT_MODES.OVERRIDE, sense, 6));
         }
+        senseSummaries.push(`${senseLabel} +${bonus} ft.`);
       }
     });
+    if (senseSummaries.length > 0) {
+      // Surface the mechanical sense grant in the effect description (tooltip),
+      // which otherwise carries only the parent item's flavour text.
+      this.effect.description = `${this.effect.description ?? ""}<p><em>Grants: ${senseSummaries.join(", ")}</em></p>`;
+    }
   }
 
   _addProficiencyBonus() {
