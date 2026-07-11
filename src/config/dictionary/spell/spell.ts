@@ -102,7 +102,9 @@ export const SPELL = {
           ? CONFIG.DND5E.spellPreparationStates.prepared.value
           : CONFIG.DND5E.spellPreparationStates.unprepared.value;
       },
-      cantripsPrepared: () => CONFIG.DND5E.spellPreparationStates.prepared.value,
+      // 2024 cantrips are not preparable — lock them always-prepared like every
+      // other class (a "prepared" pip on a cantrip is editable but inert in dnd5e)
+      cantripsPrepared: () => CONFIG.DND5E.spellPreparationStates.always.value,
     },
     { name: "Bard", method: "spell", preparation: () => CONFIG.DND5E.spellPreparationStates.always.value },
     {
@@ -225,7 +227,9 @@ export const SPELL = {
           ? CONFIG.DND5E.spellPreparationStates.prepared.value
           : CONFIG.DND5E.spellPreparationStates.unprepared.value;
       },
-      cantripsPrepared: () => CONFIG.DND5E.spellPreparationStates.prepared.value,
+      // 2024 cantrips are not preparable — lock them always-prepared like every
+      // other class (a "prepared" pip on a cantrip is editable but inert in dnd5e)
+      cantripsPrepared: () => CONFIG.DND5E.spellPreparationStates.always.value,
     },
     {
       name: "Monk",
