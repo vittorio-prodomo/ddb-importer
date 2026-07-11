@@ -93,7 +93,8 @@ export default class ExternalAutomations {
     logger.info("Starting to update actor documents with Cauldron of Plentiful Resources effects");
     const documents = actor.getEmbeddedCollection("Item").toObject().filter((d) =>
       foundry.utils.getProperty(d, "flags.ddbimporter.ignoreItemImport") !== true
-      && foundry.utils.getProperty(d, "flags.ddbimporter.ignoreItemForChrisPremades") !== true,
+      && (foundry.utils.getProperty(d, "flags.ddbimporter.ignoreItemForChrisPremades") !== true
+        || ChrisPremadesHelper.isFreeCastSpellCopy(d as unknown as TExternalAutomationDocuments)),
     );
     const isMonster = actor.type === "npc";
     const monsterName = isMonster ? actor.name : null;

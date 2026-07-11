@@ -261,9 +261,36 @@ export default class ChrisPremadesHelper {
 
   }
 
+  /**
+   * A dual-mode free-cast spell copy (quirk #6: lineage/feat "innate" copies whose activity
+   * consumes the item's own uses pool). These are parse-time flagged with
+   * ignoreItemForChrisPremades so the CPR swap doesn't stomp their itemUses wiring; they may
+   * still receive a CPR-authored automation if the consumption is re-pointed after the swap.
+   */
+  static isFreeCastSpellCopy(document: TExternalAutomationDocuments): boolean {
+    return document.type === "spell"
+      && foundry.utils.getProperty(document, "flags.ddbimporter.ignoreItemForChrisPremades") === true
+      && Boolean(foundry.utils.getProperty(document, "system.uses.max"));
+  }
+
+  /**
+   * Rewrite slot-shaped consumption on the (just-copied) CPR activities back to the free-cast
+   * copy's own uses pool — the counterpart of isFreeCastSpellCopy for the post-swap document.
+   */
+  repointSpellSlotConsumptionToItemUses() {
+    const activities = foundry.utils.getProperty(this.document, "system.activities") as Record<string, any> ?? {};
+    for (const activity of Object.values(activities)) {
+      if (activity?.consumption?.spellSlot !== true) continue;
+      activity.consumption.spellSlot = false;
+      activity.consumption.targets = [{ type: "itemUses", target: "", value: "1" }];
+    }
+    logger.debug(`Re-pointed spell slot consumption to item uses for ${this.document.name}`);
+  }
+
   static async findAndUpdate({ document, type, monsterName = null, chrisNameOverride = null }: { document: TExternalAutomationDocuments; type: string; monsterName?: string | null; chrisNameOverride?: string | null }): Promise<TExternalAutomationDocuments> {
     if (!game.modules.get("chris-premades")?.active) return document;
-    if (foundry.utils.getProperty(document, "flags.ddbimporter.ignoreItemForChrisPremades") === true) {
+    const freeCastRepoint = ChrisPremadesHelper.isFreeCastSpellCopy(document);
+    if (foundry.utils.getProperty(document, "flags.ddbimporter.ignoreItemForChrisPremades") === true && !freeCastRepoint) {
       logger.info(`${document.name} set to ignore Cauldron of Plentiful Resources effect application`);
       return document;
     }
@@ -288,7 +315,16 @@ export default class ChrisPremadesHelper {
       return document;
     }
 
+    if (freeCastRepoint && foundry.utils.getProperty(chrisDoc, "flags.chris-premades.info.source") !== "chris-premades") {
+      // additional-compendium matches are just slot-shaped copies of the same spell — swapping
+      // those onto a free-cast copy destroys its itemUses wiring for zero automation gain
+      logger.info(`${document.name}: free-cast copy kept as parsed (matched automation is not CPR-authored)`);
+      return document;
+    }
+
     chrisHelper.updateOriginalDocument();
+
+    if (freeCastRepoint) chrisHelper.repointSpellSlotConsumptionToItemUses();
 
     return chrisHelper.document;
   }
