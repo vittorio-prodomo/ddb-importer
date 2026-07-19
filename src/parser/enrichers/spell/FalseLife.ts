@@ -10,7 +10,8 @@ export default class FalseLife extends DDBEnricherData {
           bonus: "4",
           types: ["temphp"],
           scalingMode: "whole",
-          scalingNumber: 5,
+          scalingNumber: 0,     // scaling.number scales DICE; 0 = no extra dice
+          scalingFormula: "5",  // flat +5 temp HP per slot level above base
         }),
       },
     };
