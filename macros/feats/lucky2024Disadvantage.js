@@ -22,6 +22,19 @@ const lucky = me.items.find((i) => i.type === "feat" && i.system?.identifier ===
 const remaining = lucky?.system?.uses?.value ?? 0;
 if (!lucky || remaining <= 0) return; // out of Luck Points -> no prompt
 
+// T61 — don't offer when the attack is ALREADY at disadvantage: the point would buy nothing.
+// Under 2024 rules a roll has disadvantage or it doesn't, "no matter how many instances", and a
+// roll where advantage and disadvantage already cancel stays cancelled if we add another
+// disadvantage. Both cases are pointless, so the gate is simply "is disadvantage effective now".
+// At isPreAttacked midi has NOT computed the tracker yet, so compute it here: checkAttackAdvantage()
+// resets the tracker first and is explicitly built to be re-called (Workflow.ts:3698-3700), its body
+// is mutation-free, and midi calls it again after this pass — which is what makes the
+// workflowOptions.disadvantage set below still land.
+// wf.disadvantage is the tracker's COMPUTED state (hasDisadvantage -> disadvantage.isActive), true
+// only when a source is active AND unsuppressed — deliberately not the raw isAdded flag.
+await wf.checkAttackAdvantage();
+if (wf.disadvantage) return;
+
 const esc = foundry.utils.escapeHTML;
 const attacker = wf.actor?.name ?? "the attacker";
 const ok = await foundry.applications.api.DialogV2.confirm({
