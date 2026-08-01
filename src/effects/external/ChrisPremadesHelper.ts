@@ -77,6 +77,30 @@ export default class ChrisPremadesHelper {
     return longName.split(":")[0].trim();
   }
 
+  /**
+   * FORK PATCH — bridge our maneuver rename to the name Cauldron of Plentiful Resources registers.
+   *
+   * ⚠️ THE TRAP: the CPR lookup keys on the RAW D&D Beyond name (`getOriginalName` reads
+   * `flags.ddbimporter.originalName` FIRST, and only falls back to the display name). For a Battle
+   * Master maneuver that raw name is "Maneuver Options: Riposte". Our enricher renames the item to
+   * "Maneuver: Riposte" for the sheet, and CPR carries a matching `aliases: ['Maneuver: Riposte']` —
+   * but the alias is never consulted, because the lookup never uses the display name. CPR registers
+   * these as "Maneuvers: <X>" (all 20, verified), and its own `renamedItems` map has no entry for the
+   * "Maneuver Options:" form. Net effect: every maneuver silently imported with NO automation, so
+   * Riposte stopped being offered on a miss (midi then falls back to its generic `isHit` default,
+   * which never fires on a miss).
+   *
+   * Applied AFTER CPR's own `renamedItems`, so upstream data always wins; returns the name unchanged
+   * when the pattern does not apply, making it safe as the terminal step of the resolution chain.
+   */
+  static ddbNameToChrisName(ddbName: string): string {
+    const MANEUVER_PREFIX = "Maneuver Options: ";
+    if (ddbName.startsWith(MANEUVER_PREFIX)) {
+      return `Maneuvers: ${ddbName.slice(MANEUVER_PREFIX.length)}`;
+    }
+    return ddbName;
+  }
+
   static getTypeMatch(doc: TExternalAutomationDocuments, isMonster = false): string {
     if (DICTIONARY.types.inventory.includes(doc.type)) {
       return "inventory";
@@ -145,7 +169,9 @@ export default class ChrisPremadesHelper {
     this.ignoreNotFound = ignoreNotFound;
     this.type = type ?? ChrisPremadesHelper.getTypeMatch(document, this.isMonster);
     this.ddbName = ChrisPremadesHelper.getOriginalName(document);
-    this.chrisName = chrisNameOverride ?? CONFIG.chrisPremades?.renamedItems[this.ddbName] ?? this.ddbName;
+    this.chrisName = chrisNameOverride
+      ?? CONFIG.chrisPremades?.renamedItems[this.ddbName]
+      ?? ChrisPremadesHelper.ddbNameToChrisName(this.ddbName);
     this.chrisDoc = null;
     this.rules = rules ?? foundry.utils.getProperty(document, "system.source.rules") as "2014" | "2024" ?? "2014";
     this.featType = featType ?? foundry.utils.getProperty(document, "system.type.value") as string;
