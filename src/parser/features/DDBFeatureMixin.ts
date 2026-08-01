@@ -1022,6 +1022,36 @@ export default class DDBFeatureMixin extends DDBActivityFactoryMixin<TDocumentTy
   }
 
 
+  // DDB names a chosen maneuver after the feature that granted it, and the 2024 Battle Master feature
+  // is literally called "Maneuver Options" -- so a chosen maneuver is composed as
+  // "Maneuver Options: Riposte" (DDBChoiceFeature#build). The canonical name everything downstream
+  // expects is "Maneuver: X".
+  //
+  // That rewrite already existed, but only inside the Maneuver ENRICHER (see enrichers/class/fighter/
+  // Maneuver.ts `override`), which is reached solely by an exact-name lookup against a 30-entry table.
+  // A maneuver missing from that table -- one DDB adds later, a homebrew, a renamed one -- therefore
+  // kept the long name, matched no chris-premades premade, and landed with no automation, no warning
+  // and no error. Normalising here instead makes the name independent of enricher coverage: every
+  // parse path (feature, action, choice) runs this method once its name is known.
+  //
+  // Safe with respect to enrichment: the enricher lookup keys on flags.ddbimporter.originalName
+  // (DDBEnricherFactoryMixin: `this.name = ddbParser?.originalName ?? ...`), which is stamped before
+  // this runs and is deliberately left carrying the DDB name.
+  static MANEUVER_NAME_PREFIXES = ["Maneuver Options:", "Maneuvers:", "Battle Master Maneuver:", "Martial Adept:"];
+
+  // The trailing "(Str.)"/"(Dex.)" disambiguator is a 2014 artifact: there, a maneuver's save DC is
+  // keyed to one chosen ability, so DDB ships the two variants as separate options. Under 2024 rules
+  // a maneuver's DC uses the better of Strength or Dexterity, so the suffix distinguishes nothing and
+  // only breaks the name match -- drop it on 2024 features and leave 2014 names exactly as they are.
+  static MANEUVER_ABILITY_SUFFIX = /\s*\((?:Str\.|Dex\.)\)\s*$/;
+
+  static normalizeManeuverName(name: string, { is2014 = false }: { is2014?: boolean } = {}): string {
+    const prefix = DDBFeatureMixin.MANEUVER_NAME_PREFIXES.find((p) => name.startsWith(p));
+    let normalized = prefix ? `Maneuver:${name.slice(prefix.length)}` : name;
+    if (!is2014) normalized = normalized.replace(DDBFeatureMixin.MANEUVER_ABILITY_SUFFIX, "");
+    return utils.nameString(normalized);
+  }
+
   _generateSystemSubType() {
     const categories = "categories" in this.ddbDefinition && this.ddbDefinition.categories ? this.ddbDefinition.categories : null;
     const subType = DDBFeatureMixin.getFeatureSubtype(this.data.name, this.type, true, categories);
@@ -1029,6 +1059,17 @@ export default class DDBFeatureMixin extends DDBActivityFactoryMixin<TDocumentTy
       foundry.utils.setProperty(this.data, "system.type.subtype", subType);
       foundry.utils.setProperty(this.data, "flags.ddbimporter.subType", subType);
     }
+    this._normalizeManeuverName();
+  }
+
+  // Called from every path that settles a subtype, including DDBChoiceFeature's override, which
+  // derives "maneuver" from the PARENT feature name and so can tag items this class's own lookup
+  // does not. Idempotent by construction.
+  _normalizeManeuverName() {
+    if (foundry.utils.getProperty(this.data, "system.type.subtype") !== "maneuver") return;
+    // mirrors the effective-ruleset expression used when stamping flags.ddbimporter.is2014 above
+    const is2014 = this.type === "class" && this._class ? this.isClass2014 : this.is2014;
+    this.data.name = DDBFeatureMixin.normalizeManeuverName(this.data.name, { is2014 });
   }
 
   _generateWeaponType() {

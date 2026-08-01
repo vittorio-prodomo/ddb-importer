@@ -63,6 +63,9 @@ export default class DDBChoiceFeature extends DDBFeature {
     const subType = DDBFeatureMixin.getFeatureSubtype(classFeatureName, "class", true);
     if (subType) foundry.utils.setProperty(this.data, "system.type.subtype", subType);
 
+    // the subtype may only now have become "maneuver" (derived from the parent feature name, which is
+    // where "Maneuver Options" lives), so re-run the canonical-name pass super() already attempted
+    this._normalizeManeuverName();
   }
 
 
