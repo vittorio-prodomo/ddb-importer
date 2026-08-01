@@ -7,6 +7,20 @@ export default class ManeuverRiposte extends Maneuver {
     return DDBEnricherData.ACTIVITY_TYPES.UTILITY;
   }
 
+  // Riposte IS a Reaction (2024 PHB), and its two reaction-shaped siblings say so — `ManeuverBrace`
+  // and `ManeuverParry` both set `activationType: "reaction"`. Riposte simply never declared an
+  // `activity`, so it inherited the base `Maneuver` blanket `"special"` that suits the *rider*
+  // maneuvers. `midiManualReaction` below is orthogonal: it sets `useConditionText = "false"` so
+  // midi never auto-fires the activity, which is why Brace can be reaction-typed and manual at once.
+  // `targetType`/`addItemConsume` are restated because this getter OVERRIDES the base, never merges.
+  get activity(): IDDBActivityData {
+    return {
+      activationType: "reaction",
+      targetType: "creature",
+      addItemConsume: true,
+    };
+  }
+
   get override(): IDDBOverrideData {
     return {
       midiManualReaction: true,
