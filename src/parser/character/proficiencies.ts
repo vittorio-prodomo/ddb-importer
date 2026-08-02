@@ -1,5 +1,6 @@
 import DDBCharacter from "../DDBCharacter";
 import { DDBModifiers } from "../lib/_module";
+import { logger } from "../../lib/_module";
 
 DDBCharacter.prototype._getCoreProficiencies = function _getCoreProficiencies(this: DDBCharacter, includeItemEffects = false): IDDBPCDnDBeyondProficiencyFlags[] {
   return DDBModifiers
@@ -12,14 +13,27 @@ DDBCharacter.prototype._getCoreProficiencies = function _getCoreProficiencies(th
 DDBCharacter.prototype._getCoreMasteries = function _getCoreMasteries(this: DDBCharacter, includeItemEffects = false): IDDBPCDnDBeyondWeaponMasteryFlags[] {
   return DDBModifiers
     .filterBaseModifiers(this.source.ddb, "weapon-mastery", { restriction: null, includeExcludedEffects: includeItemEffects })
-    .map((prof) => {
+    .flatMap((prof) => {
       const weaponRegex = /(.*) \(([\w-, ]+)\)$/ig;
       const masteryDetails = weaponRegex.exec(prof.friendlySubtypeName);
+      // ⚠️ FORK PATCH (queue T112). `exec` returns null when the name does not fit
+      // "Mastery (Weapon)", and upstream dereferences it unguarded — so ONE oddly-shaped
+      // weapon-mastery grant throws inside `_generateProficiencies` and aborts the ENTIRE
+      // character parse, with an error naming neither the character nor the offending value.
+      // A mastery we cannot read is worth losing; the whole import is not.
+      if (!masteryDetails) {
+        logger.warn(
+          `Skipping weapon mastery "${prof.friendlySubtypeName}" — it does not match the expected `
+          + `"Mastery (Weapon)" shape, so it cannot be mapped to a dnd5e mastery id.`,
+          { friendlySubtypeName: prof.friendlySubtypeName, modifier: prof },
+        );
+        return [];
+      }
       const dnd5eNameArray = masteryDetails[2].trim().toLowerCase().split(",");
       const dnd5eName = dnd5eNameArray.length === 2
         ? `${dnd5eNameArray[1].trim()}${dnd5eNameArray[0].trim()}`.replaceAll(" ", "")
         : dnd5eNameArray[0].replaceAll(" ", "");
-      return { weapon: masteryDetails[2].trim(), mastery: masteryDetails[1].trim(), dnd5eName };
+      return [{ weapon: masteryDetails[2].trim(), mastery: masteryDetails[1].trim(), dnd5eName }];
     });
 };
 
