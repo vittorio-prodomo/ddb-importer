@@ -28,11 +28,13 @@
 
   <button data-action="updateCharacter" type="button" id="dndbeyond-character-update"
     {{#if syncEnabled}}enabled{{else if useLocalPatreonKeyAndItemsMunched}}enabled{{else}}disabled{{/if}}>
-    {{#if tiers.supporter}}
-      {{#if itemsMunched}}Update D&D Beyond with changes{{else}}Please import D&D Beyond items and spells into your DDB compendiums first.{{/if}}
-    {{else if useLocalPatreonKey}}
-      {{#if itemsMunched}}Update D&D Beyond with changes{{else}}Your DM needs to import D&D Beyond items and spells into the DDB compendiums first.{{/if}}
-    {{else}}D&D Beyond Update Available to Patreon Supporters{{/if}}</button>
+    {{!-- Label follows the SAME condition as the enabled attribute above. It used to
+          branch on tiers.supporter, which is false for a custom proxy even though
+          syncEnabled is true -- so the button worked while announcing it did not. --}}
+    {{#if syncEnabled}}Update D&D Beyond with changes
+    {{else if useLocalPatreonKeyAndItemsMunched}}Update D&D Beyond with changes
+    {{else if itemsMunched}}D&D Beyond Update Available to Patreon Supporters
+    {{else}}Please import D&D Beyond items and spells into your DDB compendiums first.{{/if}}</button>
 
     {{#if dynamicUpdateAllowed}}
 
