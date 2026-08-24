@@ -127,3 +127,72 @@ test("skips an addition that has no ddbimporter id to send", () => {
 
   assert.deepEqual(calls, []);
 });
+
+import { attributeSpellsToClass } from "../src/updater/spellSync.ts";
+
+// A spell dragged from the DDB spell compendium carries definitionId and the mapping
+// id, but characterClassId is NULL — that field is per-character, not per-spell. Left
+// unattributed the diff drops it, so "learned a new spell" silently never synced.
+// Verified live 2026-08-24: adding Alarm from the compendium synced nothing.
+
+test("attributes an unassigned spell to the only spellcasting class", () => {
+  const loose = { ...fSpell(1991), characterClassId: null as never };
+
+  const [out] = attributeSpellsToClass([loose], new Set([WIZARD]));
+
+  assert.equal(out.characterClassId, WIZARD);
+});
+
+test("leaves an unassigned spell alone when the character multiclasses", () => {
+  // Guessing which class learned it could write the spell to the wrong class list.
+  const loose = { ...fSpell(1991), characterClassId: null as never };
+
+  const [out] = attributeSpellsToClass([loose], new Set([WIZARD, SORCERER]));
+
+  assert.equal(out.characterClassId, null);
+});
+
+test("leaves an unassigned spell alone when there is no spellcasting class at all", () => {
+  const loose = { ...fSpell(1991), characterClassId: null as never };
+
+  const [out] = attributeSpellsToClass([loose], new Set());
+
+  assert.equal(out.characterClassId, null);
+});
+
+test("never overwrites a class the spell already names", () => {
+  const assigned = fSpell(1991, { characterClassId: SORCERER });
+
+  const [out] = attributeSpellsToClass([assigned], new Set([WIZARD]));
+
+  assert.equal(out.characterClassId, SORCERER);
+});
+
+test("an attributed spell then reaches the diff as an addition", () => {
+  const loose = { ...fSpell(2110, { entryId: 2307 }), characterClassId: null as never };
+
+  const attributed = attributeSpellsToClass([loose], new Set([WIZARD]));
+  const d = diffKnownSpells(attributed, [], OPTS);
+
+  assert.deepEqual(d.toAdd.map((s) => s.definitionId), [2110]);
+});
+
+test("does not re-add a spell D&D Beyond already lists but does not count as known", () => {
+  // Granted / always-prepared spells appear in classSpells with countsAsKnownSpell:false.
+  // They must not be treated as absent: re-adding one rewrites its entry as a *known*
+  // spell and changes its provenance. Caught live 2026-08-24 — Resilient Sphere was
+  // silently re-added on a real sheet.
+  const granted = dSpell(2230, { countsAsKnownSpell: false });
+
+  const d = diffKnownSpells([fSpell(2230)], [granted], OPTS);
+
+  assert.deepEqual(d.toAdd, [], "DDB already has it; presence is what matters for adds");
+});
+
+test("still never removes a spell that does not count as known", () => {
+  // The other direction is unchanged: a granted spell absent from Foundry is not a
+  // removal candidate, because the player never "knew" it in the first place.
+  const d = diffKnownSpells([], [dSpell(2230, { countsAsKnownSpell: false })], OPTS);
+
+  assert.deepEqual(d.toRemove, []);
+});

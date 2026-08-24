@@ -56,15 +56,23 @@ export function diffKnownSpells(
     && s.definitionId !== undefined
     && knownCasterClassIds.has(s.characterClassId));
 
-  const relevantDDB = ddbSpells.filter((s) =>
+  // Removal candidates: only spells the player actually KNOWS. A granted or
+  // always-prepared spell was never learned, so its absence from Foundry is not a
+  // decision to forget it.
+  const removableDDB = ddbSpells.filter((s) =>
     s.countsAsKnownSpell
     && knownCasterClassIds.has(s.characterClassId));
 
-  const ddbKeys = new Set(relevantDDB.map(key));
+  // ⚠️ Additions are judged against EVERY spell D&D Beyond lists, counted-as-known or
+  // not. Judging them against the removable set re-adds a granted spell as a *known*
+  // one and rewrites its provenance — observed doing exactly that on a live sheet.
+  const presentOnDDB = new Set(
+    ddbSpells.filter((s) => knownCasterClassIds.has(s.characterClassId)).map(key),
+  );
   const foundryKeys = new Set(relevantFoundry.map(key));
 
-  const toAdd = relevantFoundry.filter((s) => !ddbKeys.has(key(s)));
-  const wanted = allowRemovals ? relevantDDB.filter((s) => !foundryKeys.has(key(s))) : [];
+  const toAdd = relevantFoundry.filter((s) => !presentOnDDB.has(key(s)));
+  const wanted = allowRemovals ? removableDDB.filter((s) => !foundryKeys.has(key(s))) : [];
 
   if (wanted.length > removalCap) {
     return {
@@ -118,4 +126,29 @@ export function buildSpellSyncCalls(diff: SpellDiff): SpellSyncCall[] {
   }));
 
   return [...adds, ...removes];
+}
+
+/**
+ * Give a class to spells that arrived without one.
+ *
+ * ⚠️ A spell dragged from the DDB spell compendium carries `definitionId` and the mapping
+ * id, but `characterClassId` is NULL — that field is per-character, not per-spell. The diff
+ * needs it, so without this an added spell is silently dropped and "learned a new spell"
+ * never reaches D&D Beyond. Verified live 2026-08-24.
+ *
+ * Only attributes when there is exactly ONE spellcasting class: on a multiclass character
+ * guessing could write the spell to the wrong class list, which is a worse failure than
+ * not syncing it.
+ */
+export function attributeSpellsToClass(
+  spells: FoundryKnownSpell[],
+  knownCasterClassIds: Set<number>,
+): FoundryKnownSpell[] {
+  if (knownCasterClassIds.size !== 1) return spells;
+  const [only] = [...knownCasterClassIds];
+
+  return spells.map((s) =>
+    (s.characterClassId === null || s.characterClassId === undefined)
+      ? { ...s, characterClassId: only }
+      : s);
 }
