@@ -78,3 +78,44 @@ export function diffKnownSpells(
 
   return { toAdd, toRemove: wanted, aborted: false };
 }
+
+export interface SpellSyncCall {
+  characterClassId: number;
+  spellId: number;
+  id: number;
+  entityTypeId: number;
+  remove: boolean;
+}
+
+/**
+ * Turn a diff into the bodies ddb-importer posts to the proxy.
+ *
+ * ⚠️ `id` means two different things by direction, both verified live 2026-08-24:
+ *  - adding:   the class-spell-list MAPPING id (`game-data/spells` entry id), which is
+ *              what flags.ddbimporter.id holds on a compendium-sourced spell.
+ *  - removing: the character's own spell ENTRY id, from classSpells[].spells[].
+ * D&D Beyond rejects the call with 400 "Missing required field: id" without one.
+ */
+export function buildSpellSyncCalls(diff: SpellDiff): SpellSyncCall[] {
+  if (diff.aborted) return [];
+
+  const adds = diff.toAdd
+    .filter((s) => s.entryId !== null && s.entryId !== undefined && s.definitionId !== null)
+    .map((s) => ({
+      characterClassId: s.characterClassId,
+      spellId: s.definitionId as number,
+      id: s.entryId as number,
+      entityTypeId: s.entityTypeId,
+      remove: false,
+    }));
+
+  const removes = diff.toRemove.map((s) => ({
+    characterClassId: s.characterClassId,
+    spellId: s.definitionId,
+    id: s.entryId,
+    entityTypeId: s.entityTypeId,
+    remove: true,
+  }));
+
+  return [...adds, ...removes];
+}

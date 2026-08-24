@@ -4,6 +4,7 @@ import { isEqual } from "../../vendor/lowdash/_module.mjs";
 import { getActorConditionStates, getCondition } from "../parser/character/conditions";
 import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
+import { diffKnownSpells, buildSpellSyncCalls } from "./spellSync";
 
 const CHARACTER_CONTAINER_ENTITY_TYPE_ID = 1581111423;
 const PARTY_CONTAINER_ENTITY_TYPE_ID = DDBPartyInventory.PARTY_CONTAINER_ENTITY_TYPE_ID;
@@ -576,6 +577,70 @@ async function updateDDBSpellsPrepared(actor, spells) {
   });
 
   return Promise.all(promises);
+}
+
+// A single sync wanting to forget more spells than this is almost certainly a broken
+// diff (a partial import, a half-finished CPR pass) rather than a player who really
+// unlearned that many. Abandon the whole pass rather than delete from a live sheet.
+const SPELL_REMOVAL_CAP = 3;
+
+async function spellsKnown(actor, ddbCharacter) {
+  if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-known")) return [];
+  const allowRemovals = Boolean(game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-known-removals"));
+
+  const ddbClassSpells = ddbCharacter.source.ddb.character.classSpells ?? [];
+
+  // Only classes that actually learn spells. DDB marks this on the spells themselves;
+  // a prepared caster (cleric, druid, paladin) knows its whole list and never "learns".
+  const knownCasterClassIds = new Set<number>(
+    ddbClassSpells
+      .filter((cls) => (cls.spells ?? []).some((s) => s.countsAsKnownSpell))
+      .map((cls) => Number(cls.characterClassId)),
+  );
+
+  const ddbSpells = ddbClassSpells.flatMap((cls) =>
+    (cls.spells ?? []).map((s) => ({
+      definitionId: s.definition.id,
+      characterClassId: cls.characterClassId,
+      entityTypeId: s.entityTypeId,
+      entryId: s.id,
+      name: s.definition.name,
+      countsAsKnownSpell: Boolean(s.countsAsKnownSpell),
+    })),
+  );
+
+  // Anything without a DDB definition id was never a DDB spell (hand-made, or added by
+  // Chris's Premades) and must stay invisible to this diff.
+  const foundrySpells = getFoundryItems(actor)
+    .filter((item) => item.type === "spell" && item.system?.method === "spell")
+    .map((item) => ({
+      definitionId: item.flags.ddbimporter?.definitionId ?? null,
+      characterClassId: item.flags.ddbimporter?.dndbeyond?.characterClassId,
+      entityTypeId: item.flags.ddbimporter?.entityTypeId,
+      entryId: item.flags.ddbimporter?.id ?? null,
+      name: item.name,
+    }))
+    .filter((s) => s.characterClassId);
+
+  const diff = diffKnownSpells(foundrySpells, ddbSpells, {
+    allowRemovals,
+    removalCap: SPELL_REMOVAL_CAP,
+    knownCasterClassIds,
+  });
+
+  if (diff.aborted) {
+    logger.error(`Spell sync abandoned for ${actor.name}: ${diff.abortReason}`, { diff, foundrySpells, ddbSpells });
+    ui.notifications.error(`DDB spell sync skipped for ${actor.name}: ${diff.abortReason}`);
+    return [];
+  }
+
+  const calls = buildSpellSyncCalls(diff);
+  logger.debug(`Spell sync for ${actor.name}`, { adds: diff.toAdd.length, removes: diff.toRemove.length });
+
+  return Promise.all(
+    calls.map((body) =>
+      updateCharacterCall(actor, "spells", body, `Spell ${body.remove ? "forgotten" : "learned"}`)),
+  );
 }
 
 async function spellsPrepared(actor, ddbCharacter) {
@@ -1426,6 +1491,7 @@ async function _updateDDBCharacter(actor) {
   const singleResults = await Promise.all(singlePromises);
   const hpResults = await hitPoints(actor, ddbCharacter);
   const spellsPreparedResults = await spellsPrepared(actor, ddbCharacter);
+  const spellsKnownResults = await spellsKnown(actor, ddbCharacter);
   const actionStatusResults = await actionUseStatus(actor, ddbCharacter);
   const nameUpdateResults = await updateCustomNames(actor, ddbCharacter);
   const addEquipmentResults = await addEquipment(actor, ddbCharacter, partyContext);
@@ -1455,6 +1521,7 @@ async function _updateDDBCharacter(actor) {
     nameUpdateResults,
     addEquipmentResults,
     spellsPreparedResults,
+    spellsKnownResults,
     removeEquipmentResults,
     equipmentStatusResults,
     actionStatusResults,

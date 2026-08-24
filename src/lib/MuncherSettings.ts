@@ -310,7 +310,21 @@ const MuncherSettings = {
         name: "sync-policy-action-use",
         isChecked: utils.getSetting<boolean>("sync-policy-action-use"),
         label: "Action Uses",
-        enabled: false,
+        // Was greyed out because the sync itself was disabled upstream. Enabled in
+        // this fork, so the checkbox has to be operable or the setting is unreachable.
+        enabled: true,
+      },
+      {
+        name: "sync-policy-spells-known",
+        isChecked: utils.getSetting<boolean>("sync-policy-spells-known"),
+        label: "Spells Known (learned)",
+        enabled: true,
+      },
+      {
+        name: "sync-policy-spells-known-removals",
+        isChecked: utils.getSetting<boolean>("sync-policy-spells-known-removals"),
+        label: "Spells Known (also push removals)",
+        enabled: true,
       },
       {
         name: "sync-policy-currency",

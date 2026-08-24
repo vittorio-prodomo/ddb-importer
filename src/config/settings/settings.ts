@@ -759,6 +759,20 @@ const SETTINGS = {
             type: Boolean,
             default: true,
           },
+          "sync-policy-spells-known": {
+            name: "ddb-importer.settings.sync-policy-spells-known.name",
+            hint: "ddb-importer.settings.sync-policy-spells-known.hint",
+            scope: "player",
+            type: Boolean,
+            default: true,
+          },
+          "sync-policy-spells-known-removals": {
+            name: "ddb-importer.settings.sync-policy-spells-known-removals.name",
+            hint: "ddb-importer.settings.sync-policy-spells-known-removals.hint",
+            scope: "player",
+            type: Boolean,
+            default: true,
+          },
           "sync-policy-inspiration": {
             name: "ddb-importer.settings.sync-policy-inspiration.name",
             hint: "ddb-importer.settings.sync-policy-inspiration.hint",

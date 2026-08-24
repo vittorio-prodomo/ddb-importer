@@ -257,6 +257,8 @@ declare global {
     "ddb-importer.sync-policy-hitpoints": boolean;
     "ddb-importer.sync-policy-hitdice": boolean;
     "ddb-importer.sync-policy-action-use": boolean;
+    "ddb-importer.sync-policy-spells-known": boolean;
+    "ddb-importer.sync-policy-spells-known-removals": boolean;
     "ddb-importer.sync-policy-inspiration": boolean;
     "ddb-importer.sync-policy-condition": boolean;
     "ddb-importer.sync-policy-deathsaves": boolean;

@@ -88,3 +88,42 @@ test("reports no work when both sides already agree", () => {
   assert.deepEqual(d.toRemove, []);
   assert.equal(d.aborted, false);
 });
+
+import { buildSpellSyncCalls } from "../src/updater/spellSync.ts";
+
+test("builds an add call from the Foundry spell's ddbimporter id", () => {
+  // For an addition DDB wants `id` = the class-spell-list mapping id, which is
+  // what flags.ddbimporter.id holds on a compendium-sourced spell. Verified live:
+  // POST spell {characterClassId, spellId: 2110, id: 2307, entityTypeId} added a
+  // spell the character had never known.
+  const diff = { toAdd: [fSpell(2110, { entryId: 2307 })], toRemove: [], aborted: false };
+
+  const calls = buildSpellSyncCalls(diff);
+
+  assert.deepEqual(calls, [{
+    characterClassId: WIZARD, spellId: 2110, id: 2307, entityTypeId: 435869154, remove: false,
+  }]);
+});
+
+test("builds a remove call from the D&D Beyond entry id", () => {
+  const diff = { toAdd: [], toRemove: [dSpell(1991, { entryId: 136027 })], aborted: false };
+
+  const calls = buildSpellSyncCalls(diff);
+
+  assert.equal(calls[0].id, 136027);
+  assert.equal(calls[0].remove, true);
+});
+
+test("builds nothing at all from an aborted diff", () => {
+  const calls = buildSpellSyncCalls({ toAdd: [fSpell(1)], toRemove: [dSpell(2)], aborted: true, abortReason: "x" });
+
+  assert.deepEqual(calls, []);
+});
+
+test("skips an addition that has no ddbimporter id to send", () => {
+  // Without a mapping id DDB answers 400 "Missing required field: id", so there
+  // is nothing useful to send.
+  const calls = buildSpellSyncCalls({ toAdd: [fSpell(5, { entryId: null })], toRemove: [], aborted: false });
+
+  assert.deepEqual(calls, []);
+});
