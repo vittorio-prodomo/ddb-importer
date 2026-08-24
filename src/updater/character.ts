@@ -4,7 +4,7 @@ import { isEqual } from "../../vendor/lowdash/_module.mjs";
 import { getActorConditionStates, getCondition } from "../parser/character/conditions";
 import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
-import { diffKnownSpells, buildSpellSyncCalls, attributeSpellsToClass } from "./spellSync";
+import { diffKnownSpells, buildSpellSyncCalls, attributeSpellsToClass, pactSlotsUsed } from "./spellSync";
 import { diffActionUses } from "./actionSync";
 import { diffHitDice } from "./hitDiceSync";
 import { changedCustomItems } from "./customItemSync";
@@ -205,7 +205,9 @@ async function updateDDBSpellSlotsPact(actor) {
       spellslots: {},
       pact: true,
     };
-    spellSlotPackData.spellslots[`level${actor.system.spells.pact.level}`] = actor.system.spells.pact.value;
+    // DDB stores slots CONSUMED; Foundry stores REMAINING. This used to send `value`
+    // straight through, so a full pact pool synced as fully spent. See pactSlotsUsed.
+    spellSlotPackData.spellslots[`level${actor.system.spells.pact.level}`] = pactSlotsUsed(actor.system.spells.pact);
     const spellPactSlots = updateCharacterCall(actor, "spell/slots", spellSlotPackData, "Pact Spell Slots");
     resolve(spellPactSlots);
   });

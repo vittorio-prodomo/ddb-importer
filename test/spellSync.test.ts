@@ -196,3 +196,35 @@ test("still never removes a spell that does not count as known", () => {
 
   assert.deepEqual(d.toRemove, []);
 });
+
+import { pactSlotsUsed } from "../src/updater/spellSync.ts";
+
+// D&D Beyond stores slots CONSUMED; Foundry stores slots REMAINING. The pact path
+// sent `pact.value` straight through, i.e. remaining-as-used. Regular slots already
+// computed max - value correctly.
+//
+// ⚠️ These cases are deliberately ASYMMETRIC. The live test that "verified" pact magic
+// used max 2 / value 1, where remaining and used are both 1 — the single value where
+// this bug is invisible. That false positive is why this test exists.
+
+test("reports pact slots as consumed, not remaining", () => {
+  assert.equal(pactSlotsUsed({ max: 2, value: 2 }), 0, "full pool = nothing used");
+  assert.equal(pactSlotsUsed({ max: 2, value: 0 }), 2, "empty pool = all used");
+});
+
+test("the symmetric case that hid the bug still holds", () => {
+  assert.equal(pactSlotsUsed({ max: 2, value: 1 }), 1);
+});
+
+test("handles a larger pool where remaining and used never coincide", () => {
+  assert.equal(pactSlotsUsed({ max: 4, value: 3 }), 1);
+  assert.equal(pactSlotsUsed({ max: 4, value: 1 }), 3);
+});
+
+test("never reports a negative consumption", () => {
+  assert.equal(pactSlotsUsed({ max: 2, value: 5 }), 0);
+});
+
+test("treats missing numbers as nothing used rather than guessing", () => {
+  assert.equal(pactSlotsUsed({ max: undefined as never, value: 1 }), 0);
+});

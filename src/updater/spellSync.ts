@@ -152,3 +152,21 @@ export function attributeSpellsToClass(
       ? { ...s, characterClassId: only }
       : s);
 }
+
+/**
+ * Pact slots CONSUMED, which is what D&D Beyond stores.
+ *
+ * ⚠️ Foundry tracks slots REMAINING (`pact.value`). The pact sync used to send that
+ * value straight through as the used count, so a full pool synced as fully spent and
+ * an empty pool as untouched. Regular spell slots already did `max - value`.
+ *
+ * ⚠️ The live test that "confirmed" pact magic used max 2 / value 1 — the one case
+ * where remaining and used are equal, so the bug could not show. Pick asymmetric
+ * numbers when checking a polarity.
+ */
+export function pactSlotsUsed(pact: { max: number; value: number }): number {
+  const max = Number(pact?.max);
+  const value = Number(pact?.value);
+  if (!Number.isFinite(max) || !Number.isFinite(value)) return 0;
+  return Math.max(0, max - value);
+}
