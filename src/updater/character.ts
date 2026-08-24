@@ -4,6 +4,10 @@ import { isEqual } from "../../vendor/lowdash/_module.mjs";
 import { getActorConditionStates, getCondition } from "../parser/character/conditions";
 import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
+import { diffKnownSpells, buildSpellSyncCalls, attributeSpellsToClass, pactSlotsUsed } from "./spellSync";
+import { diffActionUses } from "./actionSync";
+import { diffHitDice } from "./hitDiceSync";
+import { changedCustomItems } from "./customItemSync";
 
 const CHARACTER_CONTAINER_ENTITY_TYPE_ID = 1581111423;
 const PARTY_CONTAINER_ENTITY_TYPE_ID = DDBPartyInventory.PARTY_CONTAINER_ENTITY_TYPE_ID;
@@ -201,7 +205,9 @@ async function updateDDBSpellSlotsPact(actor) {
       spellslots: {},
       pact: true,
     };
-    spellSlotPackData.spellslots[`level${actor.system.spells.pact.level}`] = actor.system.spells.pact.value;
+    // DDB stores slots CONSUMED; Foundry stores REMAINING. This used to send `value`
+    // straight through, so a full pact pool synced as fully spent. See pactSlotsUsed.
+    spellSlotPackData.spellslots[`level${actor.system.spells.pact.level}`] = pactSlotsUsed(actor.system.spells.pact);
     const spellPactSlots = updateCharacterCall(actor, "spell/slots", spellSlotPackData, "Pact Spell Slots");
     resolve(spellPactSlots);
   });
@@ -209,7 +215,7 @@ async function updateDDBSpellSlotsPact(actor) {
 
 async function spellSlotsPact(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-slots")) resolve();
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-slots")) return resolve();
     if (
       actor.system.spells.pact.max > 0
       && ddbCharacter.data.character.system.spells.pact.value !== actor.system.spells.pact.value
@@ -242,7 +248,7 @@ async function updateDynamicDDBSpellSlots(actor, update) {
 
 async function spellSlots(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-slots")) resolve();
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-slots")) return resolve();
 
     const spellSlotData = { spellslots: {}, update: false };
     for (let i = 1; i <= 9; i++) {
@@ -336,7 +342,7 @@ async function updateDDBXP(actor) {
 
 async function xp(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-xp")) resolve();
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-xp")) return resolve();
     const same = ddbCharacter.data.character.system.details.xp.value === actor.system.details.xp.value;
 
     if (!same) {
@@ -402,7 +408,7 @@ async function updateDDBInspiration(actor) {
 
 async function inspiration(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-inspiration")) resolve();
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-inspiration")) return resolve();
     const same = ddbCharacter.data.character.system.attributes.inspiration === actor.system.attributes.inspiration;
 
     if (!same) {
@@ -513,7 +519,7 @@ async function updateDDBHitDice(actor, klass, update) {
 
 async function hitDice(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-hitdice")) resolve();
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-hitdice")) return resolve();
 
     const ddbClasses = ddbCharacter.data.classes;
 
@@ -526,12 +532,13 @@ async function hitDice(actor, ddbCharacter) {
       resetMaxHpModifier: false,
     };
 
-    klasses.forEach((klass) => {
-      const classMatch = ddbClasses.find((ddbClass) => ddbClass.flags.ddbimporter.id === klass.flags.ddbimporter.id);
-      if (classMatch && classMatch.system.hitDiceUsed !== klass.system.hitDiceUsed) {
-        hitDiceData.classHitDiceUsed[klass.flags.ddbimporter.id] = klass.system.hd.spent;
-      }
-    });
+    // ⚠️ Compare system.hd.spent. The old code compared system.hitDiceUsed, which
+    // exists on neither side under dnd5e 5.x, so the check was always false. See
+    // hitDiceSync.ts.
+    hitDiceData.classHitDiceUsed = diffHitDice(
+      klasses.map((klass) => ({ ddbId: klass.flags.ddbimporter.id, spent: klass.system?.hd?.spent })),
+      ddbClasses.map((ddbClass) => ({ ddbId: ddbClass.flags?.ddbimporter?.id, spent: ddbClass.system?.hd?.spent })),
+    );
 
     const same = isEqual({}, hitDiceData.classHitDiceUsed);
     if (!same) {
@@ -576,6 +583,75 @@ async function updateDDBSpellsPrepared(actor, spells) {
   });
 
   return Promise.all(promises);
+}
+
+// A single sync wanting to forget more spells than this is treated as a broken diff
+// (a partial import, a half-finished CPR pass) rather than a player who really
+// unlearned that many, and the whole pass is abandoned rather than deleting from a
+// live sheet. The number is Vittorio's chosen tolerance, not a derived threshold.
+const SPELL_REMOVAL_CAP = 5;
+
+async function spellsKnown(actor, ddbCharacter) {
+  if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-known")) return [];
+  const allowRemovals = Boolean(game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-known-removals"));
+
+  const ddbClassSpells = ddbCharacter.source.ddb.character.classSpells ?? [];
+
+  // Only classes that actually learn spells. DDB marks this on the spells themselves;
+  // a prepared caster (cleric, druid, paladin) knows its whole list and never "learns".
+  const knownCasterClassIds = new Set<number>(
+    ddbClassSpells
+      .filter((cls) => (cls.spells ?? []).some((s) => s.countsAsKnownSpell))
+      .map((cls) => Number(cls.characterClassId)),
+  );
+
+  const ddbSpells = ddbClassSpells.flatMap((cls) =>
+    (cls.spells ?? []).map((s) => ({
+      definitionId: s.definition.id,
+      characterClassId: cls.characterClassId,
+      entityTypeId: s.entityTypeId,
+      entryId: s.id,
+      name: s.definition.name,
+      countsAsKnownSpell: Boolean(s.countsAsKnownSpell),
+    })),
+  );
+
+  // Anything without a DDB definition id was never a DDB spell (hand-made, or added by
+  // Chris's Premades) and must stay invisible to this diff.
+  const rawFoundrySpells = getFoundryItems(actor)
+    .filter((item) => item.type === "spell" && item.system?.method === "spell")
+    .map((item) => ({
+      definitionId: item.flags.ddbimporter?.definitionId ?? null,
+      characterClassId: item.flags.ddbimporter?.dndbeyond?.characterClassId ?? null,
+      entityTypeId: item.flags.ddbimporter?.entityTypeId,
+      entryId: item.flags.ddbimporter?.id ?? null,
+      name: item.name,
+    }));
+
+  // Spells dragged in from the DDB compendium have no characterClassId; attribute them
+  // BEFORE filtering, or a newly learned spell is dropped before it is ever considered.
+  const foundrySpells = attributeSpellsToClass(rawFoundrySpells, knownCasterClassIds)
+    .filter((s) => s.characterClassId);
+
+  const diff = diffKnownSpells(foundrySpells, ddbSpells, {
+    allowRemovals,
+    removalCap: SPELL_REMOVAL_CAP,
+    knownCasterClassIds,
+  });
+
+  if (diff.aborted) {
+    logger.error(`Spell sync abandoned for ${actor.name}: ${diff.abortReason}`, { diff, foundrySpells, ddbSpells });
+    ui.notifications.error(`DDB spell sync skipped for ${actor.name}: ${diff.abortReason}`);
+    return [];
+  }
+
+  const calls = buildSpellSyncCalls(diff);
+  logger.debug(`Spell sync for ${actor.name}`, { adds: diff.toAdd.length, removes: diff.toRemove.length });
+
+  return Promise.all(
+    calls.map((body) =>
+      updateCharacterCall(actor, "spells", body, `Spell ${body.remove ? "forgotten" : "learned"}`)),
+  );
 }
 
 async function spellsPrepared(actor, ddbCharacter) {
@@ -840,8 +916,11 @@ async function addDDBEquipment(actor, itemsToAdd) {
 }
 
 async function addEquipment(actor, ddbCharacter, partyContext: any = null) {
-  const syncItemReady = actor.flags.ddbimporter?.syncItemReady;
-  if (syncItemReady && !game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
+  // The setting alone gates this. It used to read `if (syncItemReady && !setting)`, so
+  // the user's Equipment checkbox was ignored whenever that flag was absent — and the
+  // flag is only stamped by a fresh import, so it is absent on every character imported
+  // before it existed. Same shape as the action-use guard.
+  if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
   const ddbItems = ddbCharacter.data.inventory;
 
   const items = getFoundryItems(actor);
@@ -914,8 +993,11 @@ async function updateDDBCustomNames(actor, items) {
 
 // updates names of items and actions
 async function updateCustomNames(actor, ddbCharacter) {
-  const syncItemReady = actor.flags.ddbimporter?.syncItemReady;
-  if (syncItemReady && !game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
+  // The setting alone gates this. It used to read `if (syncItemReady && !setting)`, so
+  // the user's Equipment checkbox was ignored whenever that flag was absent — and the
+  // flag is only stamped by a fresh import, so it is absent on every character imported
+  // before it existed. Same shape as the action-use guard.
+  if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
   const ddbItems = ddbCharacter.data.inventory;
 
   const foundryItems = getFoundryItems(actor);
@@ -966,8 +1048,11 @@ async function moveDDBEquipment(actor, moves) {
 }
 
 async function removeEquipment(actor, ddbCharacter, partyContext: any = null) {
-  const syncItemReady = actor.flags.ddbimporter?.syncItemReady;
-  if (syncItemReady && !game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
+  // The setting alone gates this. It used to read `if (syncItemReady && !setting)`, so
+  // the user's Equipment checkbox was ignored whenever that flag was absent — and the
+  // flag is only stamped by a fresh import, so it is absent on every character imported
+  // before it existed. Same shape as the action-use guard.
+  if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
   const ddbItems = ddbCharacter.data.inventory;
   const actorItems = getFoundryItems(actor).filter((item) =>
     foundry.utils.getProperty(item, "flags.ddbimporter.action") !== true
@@ -1158,11 +1243,14 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
           mappingId: item.flags.ddbimporter.id,
           name: item.name,
           description: getCustomItemDescription(item.system.description.value),
-          // revist these need to be ints
-          // weight: `${item.data.weight}`,
-          // cost: item.data.price.value,
-          cost: null,
-          weight: Number.isInteger(item.system.weight) ? parseInt(item.system.weight) : 0,
+          // ⚠️ custom/item UPDATE is a FULL REPLACE on D&D Beyond, so every field here
+          // overwrites what is on the sheet. Two of them used to destroy real data:
+          //   - weight is {value, units} in dnd5e 5.x, so Number.isInteger() was false
+          //     and it always sent 0, zeroing the weight;
+          //   - cost was hardcoded null, wiping the price.
+          // Verified live 2026-08-24: a sync took a 1 lb / 5 gp item to 0 lb / no cost.
+          cost: item.system.price?.value ?? null,
+          weight: Number(item.system.weight?.value ?? item.system.weight) || 0,
           quantity: parseInt(item.system.quantity),
         },
       };
@@ -1174,8 +1262,11 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
 
 
 async function equipmentStatus(actor, ddbCharacter, addEquipmentResults) {
-  const syncItemReady = actor.flags.ddbimporter?.syncItemReady;
-  if (syncItemReady && !game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
+  // The setting alone gates this. It used to read `if (syncItemReady && !setting)`, so
+  // the user's Equipment checkbox was ignored whenever that flag was absent — and the
+  // flag is only stamped by a fresh import, so it is absent on every character imported
+  // before it existed. Same shape as the action-use guard.
+  if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
   // reload the actor following potential updates to equipment
   let ddbItems = ddbCharacter.source.ddb.character.inventory;
   const customDDBItems = ddbCharacter.source.ddb.character.customItems;
@@ -1244,22 +1335,30 @@ async function equipmentStatus(actor, ddbCharacter, addEquipmentResults) {
     ),
   );
 
-  // update.name || update.data?.description || update.data?.weight || update.data?.price || update.data?.quantity
-  const customItems = foundryItems.filter((item) =>
-    foundry.utils.hasProperty(item, "flags.ddbimporter.id")
-    && item.system?.quantity !== 0
-    && (foundry.utils.getProperty(item, "flags.ddbimporter.custom") === true || foundry.utils.getProperty(item, "flags.ddbimporter.isCustom") === true)
-    && customDDBItems.some((dItem) => dItem.id === item.flags.ddbimporter.id
-      && (
-        item.name !== dItem.name
-        || getCustomItemDescription(item.system.description.value) != dItem.description
-        || (foundry.utils.hasProperty(item, "system.quantity") && item.system.quantity != dItem.quantity)
-        || (foundry.utils.hasProperty(item, "system.weight") && item.system.weight != dItem.weight)
-        //  ||
-        // item.data.price != dItem.cost
-      ),
-    ),
+  // ⚠️ Matched on flags.ddbimporter.definitionId, NOT .id. DDB's customItems[].id is
+  // the DEFINITION id; .id is the inventory entry id, a different number. The old code
+  // compared DDB's id to the entry id, so it never matched and custom items never
+  // synced. See customItemSync.ts.
+  const customCandidates = foundryItems.filter((item) =>
+    item.system?.quantity !== 0
+    && (foundry.utils.getProperty(item, "flags.ddbimporter.custom") === true
+      || foundry.utils.getProperty(item, "flags.ddbimporter.isCustom") === true));
+
+  const changedCustom = changedCustomItems(
+    customCandidates.map((item) => ({
+      definitionId: foundry.utils.getProperty(item, "flags.ddbimporter.definitionId") ?? null,
+      entryId: foundry.utils.getProperty(item, "flags.ddbimporter.id") ?? null,
+      name: item.name,
+      description: getCustomItemDescription(item.system?.description?.value),
+      quantity: item.system?.quantity,
+      // same {value, units} shape — compare the number, not the object
+      weight: Number(item.system?.weight?.value ?? item.system?.weight),
+    })),
+    customDDBItems ?? [],
   );
+  const changedDefinitionIds = new Set(changedCustom.map((c) => c.definitionId));
+  const customItems = customCandidates.filter((item) =>
+    changedDefinitionIds.has(foundry.utils.getProperty(item, "flags.ddbimporter.definitionId")));
 
   const itemsToMove = foundryItems.filter((item) =>
     foundry.utils.hasProperty(item, "flags.ddbimporter.id")
@@ -1310,6 +1409,10 @@ async function updateActionUseStatus(actor, actionData, actionName) {
   });
 }
 
+// ⚠️ Sends flags.ddbimporter.id as `actionId`, which is the CLASS FEATURE id, not the
+// ACTION id D&D Beyond's write API expects — see actionSync.ts. Only the dynamic path
+// still calls this, and that path is disabled below for exactly this reason. The batch
+// path resolves the id properly through the raw action's componentId.
 async function updateDDBActionUseStatus(actor, actions) {
   const promises = [];
   actions.forEach((rawAction) => {
@@ -1325,30 +1428,57 @@ async function updateDDBActionUseStatus(actor, actions) {
 }
 
 async function actionUseStatus(actor, ddbCharacter) {
-  return [];
-  // action use disabled until feature/action parser sync
+  // Enabled in this fork 2026-08-24 (it was behind an unconditional `return []`).
+  //
+  // ⚠️ Rewritten, because merely enabling it synced NOTHING. The old code looked for the
+  // Foundry item inside `ddbCharacter.data.actions` and matched on flags.ddbimporter.id.
+  // Neither side lines up: a limited-use feature is parsed as a `feat`, not an action, so
+  // data.actions holds no entry with uses at all, and the id on the Foundry item is the
+  // CLASS FEATURE id while the write API wants the ACTION id. It ran clean and did nothing
+  // — verified live against a real character before this rewrite.
+  //
+  // The bridge is the raw action's componentId/componentTypeId. See actionSync.ts.
+  if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-action-use")) return [];
 
-  const syncActionReady = actor.flags.ddbimporter?.syncActionReady;
-  if (syncActionReady && !game.settings.get(SETTINGS.MODULE_ID, "sync-policy-action-use")) return [];
+  const rawActions = ddbCharacter.source.ddb.character.actions ?? {};
+  const ddbActions = Object.values(rawActions)
+    .flat()
+    .filter((a: any) => a?.limitedUse)
+    .map((a: any) => ({
+      id: Number(a.id),
+      entityTypeId: Number(a.entityTypeId),
+      componentId: Number(a.componentId),
+      componentTypeId: Number(a.componentTypeId),
+      name: a.name,
+      numberUsed: Number(a.limitedUse.numberUsed ?? 0),
+    }));
 
-  const ddbActions = ddbCharacter.data.actions;
+  // ⚠️ getFoundryItems() returns SOURCE data (toObject()), where `uses.max` is the
+  // unevaluated formula ("5 * @classes.paladin.levels") and `uses.value` does not exist
+  // at all — the source stores only `spent`. Reading uses from it yields NaN, which is
+  // how this silently synced nothing. Take identity from the source item (so
+  // ignoreItemUpdate is still honoured) but read the counts off the LIVE document.
+  const foundryItems = getFoundryItems(actor)
+    .filter((item) => item.flags.ddbimporter?.action || item.type === "feat")
+    .map((item) => {
+      const live = actor.items.get(item._id);
+      const max = Number(live?.system?.uses?.max);
+      const value = Number(live?.system?.uses?.value);
+      return {
+        ddbId: item.flags.ddbimporter?.id ?? null,
+        entityTypeId: item.flags.ddbimporter?.entityTypeId ?? null,
+        name: item.name,
+        used: Number.isFinite(max) && Number.isFinite(value) ? Math.max(0, max - value) : NaN,
+      };
+    })
+    .filter((i) => Number.isFinite(i.used));
 
-  const foundryItems = getFoundryItems(actor);
+  const calls = diffActionUses(foundryItems, ddbActions);
+  logger.debug(`Action use sync for ${actor.name}`, { candidates: foundryItems.length, ddbActions: ddbActions.length, calls });
 
-  const actionsToChange = foundryItems.filter((item) =>
-    (item.flags.ddbimporter?.action || item.type === "feat")
-    && item.flags.ddbimporter?.id && item.flags.ddbimporter?.entityTypeId
-    && ddbActions.some((dItem) =>
-      item.flags.ddbimporter.id === dItem.flags.ddbimporter.id
-      && item.flags.ddbimporter.entityTypeId === dItem.flags.ddbimporter.entityTypeId
-      && item.name === dItem.name && item.type === dItem.type
-      && Number.isInteger(parseInt(item.system.uses?.value))
-      && Number.parseInt(item.system.uses.value) !== Number.parseInt(dItem.system.uses.value),
-    ),
+  return Promise.all(
+    calls.map((body) => updateCharacterCall(actor, "action/use", body, `Action uses for ${actor.name}`)),
   );
-  const actionChanges = updateDDBActionUseStatus(actor, actionsToChange);
-
-  return actionChanges;
 }
 
 async function _updateDDBCharacter(actor) {
@@ -1422,6 +1552,7 @@ async function _updateDDBCharacter(actor) {
   const singleResults = await Promise.all(singlePromises);
   const hpResults = await hitPoints(actor, ddbCharacter);
   const spellsPreparedResults = await spellsPrepared(actor, ddbCharacter);
+  const spellsKnownResults = await spellsKnown(actor, ddbCharacter);
   const actionStatusResults = await actionUseStatus(actor, ddbCharacter);
   const nameUpdateResults = await updateCustomNames(actor, ddbCharacter);
   const addEquipmentResults = await addEquipment(actor, ddbCharacter, partyContext);
@@ -1451,6 +1582,7 @@ async function _updateDDBCharacter(actor) {
     nameUpdateResults,
     addEquipmentResults,
     spellsPreparedResults,
+    spellsKnownResults,
     removeEquipmentResults,
     equipmentStatusResults,
     actionStatusResults,
@@ -1667,7 +1799,11 @@ async function activeUpdateUpdateItem(document, update) {
       logger.debug("Preparing to sync item change to DDB...");
       const action = document.flags.ddbimporter?.action || document.type === "feat";
       const syncEquipment = game.settings.get(SETTINGS.MODULE_ID, "dynamic-sync-policy-equipment");
-      // dynamic actions sync disabled
+      // ⚠️ Deliberately still OFF, unlike the batch path. Resolving a Foundry feature to its
+      // DDB action needs the raw character JSON (componentId), which the batch sync already
+      // has but this per-item hook does not — and fetching it on every item update is not
+      // acceptable on a hot path. Left enabled it would post the wrong id and surface a DDB
+      // error to the player, which is worse than not syncing live. Batch sync covers it.
       const syncActionUse = false; // game.settings.get(SETTINGS.MODULE_ID, "dynamic-sync-policy-action-use");
       const syncHD = game.settings.get(SETTINGS.MODULE_ID, "dynamic-sync-policy-hitdice");
       const syncSpellsPrepared = game.settings.get(SETTINGS.MODULE_ID, "dynamic-sync-policy-spells-prepared");
