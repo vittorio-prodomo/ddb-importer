@@ -579,10 +579,11 @@ async function updateDDBSpellsPrepared(actor, spells) {
   return Promise.all(promises);
 }
 
-// A single sync wanting to forget more spells than this is almost certainly a broken
-// diff (a partial import, a half-finished CPR pass) rather than a player who really
-// unlearned that many. Abandon the whole pass rather than delete from a live sheet.
-const SPELL_REMOVAL_CAP = 3;
+// A single sync wanting to forget more spells than this is treated as a broken diff
+// (a partial import, a half-finished CPR pass) rather than a player who really
+// unlearned that many, and the whole pass is abandoned rather than deleting from a
+// live sheet. The number is Vittorio's chosen tolerance, not a derived threshold.
+const SPELL_REMOVAL_CAP = 5;
 
 async function spellsKnown(actor, ddbCharacter) {
   if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-known")) return [];
