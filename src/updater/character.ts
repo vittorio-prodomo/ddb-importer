@@ -6,6 +6,7 @@ import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
 import { diffKnownSpells, buildSpellSyncCalls, attributeSpellsToClass } from "./spellSync";
 import { diffActionUses } from "./actionSync";
+import { diffHitDice } from "./hitDiceSync";
 
 const CHARACTER_CONTAINER_ENTITY_TYPE_ID = 1581111423;
 const PARTY_CONTAINER_ENTITY_TYPE_ID = DDBPartyInventory.PARTY_CONTAINER_ENTITY_TYPE_ID;
@@ -211,7 +212,7 @@ async function updateDDBSpellSlotsPact(actor) {
 
 async function spellSlotsPact(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-slots")) resolve();
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-slots")) return resolve();
     if (
       actor.system.spells.pact.max > 0
       && ddbCharacter.data.character.system.spells.pact.value !== actor.system.spells.pact.value
@@ -244,7 +245,7 @@ async function updateDynamicDDBSpellSlots(actor, update) {
 
 async function spellSlots(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-slots")) resolve();
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-slots")) return resolve();
 
     const spellSlotData = { spellslots: {}, update: false };
     for (let i = 1; i <= 9; i++) {
@@ -338,7 +339,7 @@ async function updateDDBXP(actor) {
 
 async function xp(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-xp")) resolve();
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-xp")) return resolve();
     const same = ddbCharacter.data.character.system.details.xp.value === actor.system.details.xp.value;
 
     if (!same) {
@@ -404,7 +405,7 @@ async function updateDDBInspiration(actor) {
 
 async function inspiration(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-inspiration")) resolve();
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-inspiration")) return resolve();
     const same = ddbCharacter.data.character.system.attributes.inspiration === actor.system.attributes.inspiration;
 
     if (!same) {
@@ -515,7 +516,7 @@ async function updateDDBHitDice(actor, klass, update) {
 
 async function hitDice(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-hitdice")) resolve();
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-hitdice")) return resolve();
 
     const ddbClasses = ddbCharacter.data.classes;
 
@@ -528,12 +529,13 @@ async function hitDice(actor, ddbCharacter) {
       resetMaxHpModifier: false,
     };
 
-    klasses.forEach((klass) => {
-      const classMatch = ddbClasses.find((ddbClass) => ddbClass.flags.ddbimporter.id === klass.flags.ddbimporter.id);
-      if (classMatch && classMatch.system.hitDiceUsed !== klass.system.hitDiceUsed) {
-        hitDiceData.classHitDiceUsed[klass.flags.ddbimporter.id] = klass.system.hd.spent;
-      }
-    });
+    // ⚠️ Compare system.hd.spent. The old code compared system.hitDiceUsed, which
+    // exists on neither side under dnd5e 5.x, so the check was always false. See
+    // hitDiceSync.ts.
+    hitDiceData.classHitDiceUsed = diffHitDice(
+      klasses.map((klass) => ({ ddbId: klass.flags.ddbimporter.id, spent: klass.system?.hd?.spent })),
+      ddbClasses.map((ddbClass) => ({ ddbId: ddbClass.flags?.ddbimporter?.id, spent: ddbClass.system?.hd?.spent })),
+    );
 
     const same = isEqual({}, hitDiceData.classHitDiceUsed);
     if (!same) {
