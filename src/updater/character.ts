@@ -1325,11 +1325,15 @@ async function updateDDBActionUseStatus(actor, actions) {
 }
 
 async function actionUseStatus(actor, ddbCharacter) {
-  return [];
-  // action use disabled until feature/action parser sync
-
-  const syncActionReady = actor.flags.ddbimporter?.syncActionReady;
-  if (syncActionReady && !game.settings.get(SETTINGS.MODULE_ID, "sync-policy-action-use")) return [];
+  // Was disabled wholesale ("until feature/action parser sync"). Enabled in this fork
+  // 2026-08-24: the matching below is identity-based (ddbimporter id + entityTypeId +
+  // name + type), not name-only, so a mismatched action simply never matches.
+  //
+  // Deliberately NOT gated on flags.ddbimporter.syncActionReady: that flag is only
+  // stamped by a fresh import, so requiring it would silently disable action sync for
+  // every character imported before it existed. The per-item guard below already
+  // demands a real DDB id and entityTypeId, which is the check that actually matters.
+  if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-action-use")) return [];
 
   const ddbActions = ddbCharacter.data.actions;
 
@@ -1667,8 +1671,7 @@ async function activeUpdateUpdateItem(document, update) {
       logger.debug("Preparing to sync item change to DDB...");
       const action = document.flags.ddbimporter?.action || document.type === "feat";
       const syncEquipment = game.settings.get(SETTINGS.MODULE_ID, "dynamic-sync-policy-equipment");
-      // dynamic actions sync disabled
-      const syncActionUse = false; // game.settings.get(SETTINGS.MODULE_ID, "dynamic-sync-policy-action-use");
+      const syncActionUse = game.settings.get(SETTINGS.MODULE_ID, "dynamic-sync-policy-action-use");
       const syncHD = game.settings.get(SETTINGS.MODULE_ID, "dynamic-sync-policy-hitdice");
       const syncSpellsPrepared = game.settings.get(SETTINGS.MODULE_ID, "dynamic-sync-policy-spells-prepared");
       const isDDBItem = document.flags.ddbimporter?.id;
