@@ -7,6 +7,7 @@ import DDBPartyInventory from "../muncher/DDBPartyInventory";
 import { diffKnownSpells, buildSpellSyncCalls, attributeSpellsToClass } from "./spellSync";
 import { diffActionUses } from "./actionSync";
 import { diffHitDice } from "./hitDiceSync";
+import { changedCustomItems } from "./customItemSync";
 
 const CHARACTER_CONTAINER_ENTITY_TYPE_ID = 1581111423;
 const PARTY_CONTAINER_ENTITY_TYPE_ID = DDBPartyInventory.PARTY_CONTAINER_ENTITY_TYPE_ID;
@@ -1231,11 +1232,14 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
           mappingId: item.flags.ddbimporter.id,
           name: item.name,
           description: getCustomItemDescription(item.system.description.value),
-          // revist these need to be ints
-          // weight: `${item.data.weight}`,
-          // cost: item.data.price.value,
-          cost: null,
-          weight: Number.isInteger(item.system.weight) ? parseInt(item.system.weight) : 0,
+          // ⚠️ custom/item UPDATE is a FULL REPLACE on D&D Beyond, so every field here
+          // overwrites what is on the sheet. Two of them used to destroy real data:
+          //   - weight is {value, units} in dnd5e 5.x, so Number.isInteger() was false
+          //     and it always sent 0, zeroing the weight;
+          //   - cost was hardcoded null, wiping the price.
+          // Verified live 2026-08-24: a sync took a 1 lb / 5 gp item to 0 lb / no cost.
+          cost: item.system.price?.value ?? null,
+          weight: Number(item.system.weight?.value ?? item.system.weight) || 0,
           quantity: parseInt(item.system.quantity),
         },
       };
@@ -1317,22 +1321,30 @@ async function equipmentStatus(actor, ddbCharacter, addEquipmentResults) {
     ),
   );
 
-  // update.name || update.data?.description || update.data?.weight || update.data?.price || update.data?.quantity
-  const customItems = foundryItems.filter((item) =>
-    foundry.utils.hasProperty(item, "flags.ddbimporter.id")
-    && item.system?.quantity !== 0
-    && (foundry.utils.getProperty(item, "flags.ddbimporter.custom") === true || foundry.utils.getProperty(item, "flags.ddbimporter.isCustom") === true)
-    && customDDBItems.some((dItem) => dItem.id === item.flags.ddbimporter.id
-      && (
-        item.name !== dItem.name
-        || getCustomItemDescription(item.system.description.value) != dItem.description
-        || (foundry.utils.hasProperty(item, "system.quantity") && item.system.quantity != dItem.quantity)
-        || (foundry.utils.hasProperty(item, "system.weight") && item.system.weight != dItem.weight)
-        //  ||
-        // item.data.price != dItem.cost
-      ),
-    ),
+  // ⚠️ Matched on flags.ddbimporter.definitionId, NOT .id. DDB's customItems[].id is
+  // the DEFINITION id; .id is the inventory entry id, a different number. The old code
+  // compared DDB's id to the entry id, so it never matched and custom items never
+  // synced. See customItemSync.ts.
+  const customCandidates = foundryItems.filter((item) =>
+    item.system?.quantity !== 0
+    && (foundry.utils.getProperty(item, "flags.ddbimporter.custom") === true
+      || foundry.utils.getProperty(item, "flags.ddbimporter.isCustom") === true));
+
+  const changedCustom = changedCustomItems(
+    customCandidates.map((item) => ({
+      definitionId: foundry.utils.getProperty(item, "flags.ddbimporter.definitionId") ?? null,
+      entryId: foundry.utils.getProperty(item, "flags.ddbimporter.id") ?? null,
+      name: item.name,
+      description: getCustomItemDescription(item.system?.description?.value),
+      quantity: item.system?.quantity,
+      // same {value, units} shape — compare the number, not the object
+      weight: Number(item.system?.weight?.value ?? item.system?.weight),
+    })),
+    customDDBItems ?? [],
   );
+  const changedDefinitionIds = new Set(changedCustom.map((c) => c.definitionId));
+  const customItems = customCandidates.filter((item) =>
+    changedDefinitionIds.has(foundry.utils.getProperty(item, "flags.ddbimporter.definitionId")));
 
   const itemsToMove = foundryItems.filter((item) =>
     foundry.utils.hasProperty(item, "flags.ddbimporter.id")
