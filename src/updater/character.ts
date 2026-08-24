@@ -916,8 +916,11 @@ async function addDDBEquipment(actor, itemsToAdd) {
 }
 
 async function addEquipment(actor, ddbCharacter, partyContext: any = null) {
-  const syncItemReady = actor.flags.ddbimporter?.syncItemReady;
-  if (syncItemReady && !game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
+  // The setting alone gates this. It used to read `if (syncItemReady && !setting)`, so
+  // the user's Equipment checkbox was ignored whenever that flag was absent — and the
+  // flag is only stamped by a fresh import, so it is absent on every character imported
+  // before it existed. Same shape as the action-use guard.
+  if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
   const ddbItems = ddbCharacter.data.inventory;
 
   const items = getFoundryItems(actor);
@@ -990,8 +993,11 @@ async function updateDDBCustomNames(actor, items) {
 
 // updates names of items and actions
 async function updateCustomNames(actor, ddbCharacter) {
-  const syncItemReady = actor.flags.ddbimporter?.syncItemReady;
-  if (syncItemReady && !game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
+  // The setting alone gates this. It used to read `if (syncItemReady && !setting)`, so
+  // the user's Equipment checkbox was ignored whenever that flag was absent — and the
+  // flag is only stamped by a fresh import, so it is absent on every character imported
+  // before it existed. Same shape as the action-use guard.
+  if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
   const ddbItems = ddbCharacter.data.inventory;
 
   const foundryItems = getFoundryItems(actor);
@@ -1042,8 +1048,11 @@ async function moveDDBEquipment(actor, moves) {
 }
 
 async function removeEquipment(actor, ddbCharacter, partyContext: any = null) {
-  const syncItemReady = actor.flags.ddbimporter?.syncItemReady;
-  if (syncItemReady && !game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
+  // The setting alone gates this. It used to read `if (syncItemReady && !setting)`, so
+  // the user's Equipment checkbox was ignored whenever that flag was absent — and the
+  // flag is only stamped by a fresh import, so it is absent on every character imported
+  // before it existed. Same shape as the action-use guard.
+  if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
   const ddbItems = ddbCharacter.data.inventory;
   const actorItems = getFoundryItems(actor).filter((item) =>
     foundry.utils.getProperty(item, "flags.ddbimporter.action") !== true
@@ -1253,8 +1262,11 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
 
 
 async function equipmentStatus(actor, ddbCharacter, addEquipmentResults) {
-  const syncItemReady = actor.flags.ddbimporter?.syncItemReady;
-  if (syncItemReady && !game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
+  // The setting alone gates this. It used to read `if (syncItemReady && !setting)`, so
+  // the user's Equipment checkbox was ignored whenever that flag was absent — and the
+  // flag is only stamped by a fresh import, so it is absent on every character imported
+  // before it existed. Same shape as the action-use guard.
+  if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-equipment")) return [];
   // reload the actor following potential updates to equipment
   let ddbItems = ddbCharacter.source.ddb.character.inventory;
   const customDDBItems = ddbCharacter.source.ddb.character.customItems;
