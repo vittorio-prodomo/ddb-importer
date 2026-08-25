@@ -103,6 +103,13 @@ export default class ChrisPremadesHelper {
 
   static getTypeMatch(doc: TExternalAutomationDocuments, isMonster = false): string {
     if (DICTIONARY.types.inventory.includes(doc.type)) {
+      // FORK PATCH (T125): CPR authors a monster's natural weapons (a familiar's Bite/Claw/Talons...)
+      // as weapon-typed items, while the importer expects "monsterfeature" for anything on a monster.
+      // Both sides are internally consistent -- the comparison was too narrow, so every guest-monster
+      // natural weapon logged an error and its CPR automation was discarded. Treat a weapon-typed doc
+      // on a monster as a monster feature so the swap goes through; this runs for the DDB doc and the
+      // CPR doc alike, so both sides of the match shift together.
+      if (isMonster && doc.type === "weapon") return "monsterfeature";
       return "inventory";
     }
     if (doc.type !== "feat") return doc.type;
@@ -273,6 +280,14 @@ export default class ChrisPremadesHelper {
     if (utils.isDefaultOrPlaceholderImage(this.document.img)) {
       this.document.img = this.chrisDoc.img;
     }
+
+    // FORK PATCH (T165): the swap replaces the item's effects wholesale with CPR's pack-authored
+    // ones, whose imgs are CPR's static icons -- so a transfer effect's sheet/VAE icon stopped
+    // matching the item art (Boots of Elvenkind). The item art wins: stamp it onto the swapped-in
+    // transfer effects. Applied effects keep their own icons (they represent the effect, not the item).
+    ((this.document.effects ?? []) as I5eEffectData[]).forEach((effect) => {
+      if (effect.transfer && this.document.img) effect.img = this.document.img;
+    });
 
     const correctionProperties = foundry.utils.getProperty(CONFIG, `chrisPremades.correctedItems.${this.chrisName}`) as unknown as any;
     if (correctionProperties) {
