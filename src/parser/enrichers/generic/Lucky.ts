@@ -73,6 +73,9 @@ export default class Lucky extends DDBEnricherData {
         midiOnly: true,
         options: {
           transfer: true,
+          // FORK PATCH (queue T156): each half carries its own concise hover text —
+          // without a description VAE falls back to the feat's full text on BOTH buffs.
+          description: "<p>Spend a Luck Point when you roll a d20 — an attack roll, ability check, or saving throw — to reroll the die and keep the higher result.</p>",
         },
         midiOptionalChanges: [
           {
@@ -94,6 +97,8 @@ export default class Lucky extends DDBEnricherData {
         midiOnly: true,
         options: {
           transfer: true,
+          // FORK PATCH (queue T156): see the Advantage half above.
+          description: "<p>Spend a Luck Point when a creature makes an attack roll against you to impose Disadvantage on that roll.</p>",
         },
         onUseMacroChanges: [
           { macroPass: "isPreAttacked", macroType: "feat", macroName: "lucky2024Disadvantage.js" },
