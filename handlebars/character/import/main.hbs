@@ -1,6 +1,8 @@
 <section id="ddb-character-manager-import-main" class="tab {{ tab.cssClass }} {{#if tab.active}} active{{/if}}" data-group="{{tab.group}}" data-tab="{{tab.id}}">
   <fieldset>
   <legend>Update targets</legend>
+    {{!-- FORK PATCH (T134): tick/untick every import checkbox at once. --}}
+    <button type="button" class="ddbimporter-toggle-all" data-action="toggleAllCheckboxes">Select all / none</button>
     <div class="form-group stacked checkbox-grid">
       <div class="form-fields" style="--num-cols:5;">
         {{#each importPolicies}}

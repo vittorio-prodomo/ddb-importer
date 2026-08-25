@@ -146,3 +146,12 @@ dialog.ddb-monster-select-dialog > section {
   max-height: 400px;
   overflow-y: auto;
 }
+
+/* FORK PATCH (T134): compact select-all/none button above the checkbox grids. */
+button.ddbimporter-toggle-all {
+  width: fit-content;
+  padding: 2px 10px;
+  font-size: var(--font-size-12, 12px);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}

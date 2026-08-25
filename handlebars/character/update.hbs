@@ -3,6 +3,9 @@
   <fieldset>
     <legend>Update selection</legend>
 
+    {{!-- FORK PATCH (T134): tick/untick every sync checkbox at once. --}}
+    <button type="button" class="ddbimporter-toggle-all" data-action="toggleAllCheckboxes">Select all / none</button>
+
     <div class="form-group stacked checkbox-grid">
       <div class="form-fields" style="--num-cols:5;">
         {{#each syncConfig}}

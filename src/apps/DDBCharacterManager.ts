@@ -77,6 +77,7 @@ export default class DDBCharacterManager extends DDBAppV2 {
       deleteLocalPatreonKey: DDBCharacterManager.deleteLocalPatreonKeyClickEvent,
       setLocalPatreonKey: DDBCharacterManager.setLocalPatreonKeyClickEvent,
       openDebug: DDBCharacterManager.openDebug,
+      toggleAllCheckboxes: DDBCharacterManager.toggleAllCheckboxesClickEvent,
     },
     position: {
       width: 900,
@@ -559,6 +560,27 @@ export default class DDBCharacterManager extends DDBAppV2 {
 
     this.element.querySelector("#dndbeyond-character-import-start").disabled = false;
     return;
+  }
+
+  /**
+   * FORK PATCH (T134): one button per checkbox grid that ticks every (enabled) checkbox in its
+   * fieldset, or unticks them all when everything is already checked. Each checkbox's name is its
+   * settings key and the grids hold only plain keys (the mutually-exclusive pairs live in other
+   * tabs), so writing the settings directly and re-rendering matches what N manual clicks do.
+   */
+  static async toggleAllCheckboxesClickEvent(this: DDBCharacterManager, _event: Event, target: HTMLElement) {
+    const fieldset = target.closest("fieldset");
+    if (!fieldset) return;
+    const checkboxes = Array.from(fieldset.querySelectorAll("dnd5e-checkbox:not([disabled])")) as (HTMLElement & { checked: boolean })[];
+    if (checkboxes.length === 0) return;
+    const newState = !checkboxes.every((checkbox) => checkbox.checked);
+    for (const checkbox of checkboxes) {
+      const key = (checkbox as HTMLElement).dataset.section;
+      if (!key) continue;
+      // eslint-disable-next-line no-await-in-loop
+      await game.settings.set(SETTINGS.MODULE_ID, key, newState);
+    }
+    await this.render();
   }
 
   static openDebug(_event, _target) {
