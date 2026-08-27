@@ -501,13 +501,20 @@ export default class CharacterSpellFactory {
       // AND redundantly here as feature-granted, where the block below force-marks them
       // always-prepared (see ~40 lines down) — contradicting RAW. generateClassSpells has
       // already imported the authoritative spellbook copy (prepared normally), so drop
-      // this redundant copy. Keyed on the spell definition id + countsAsKnownSpell so
-      // genuine always-prepared grants (which are NOT known spellbook spells) are
-      // unaffected.
-      const knownInSpellbook = this.ddb.character.classSpells.some((cls) =>
-        cls.spells?.some((known) =>
-          known.definition?.id === spell.definition.id && known.countsAsKnownSpell),
-      );
+      // this redundant copy.
+      //
+      // ⚠️ Discriminate on the grant's own alwaysPrepared flag, NOT on
+      // countsAsKnownSpell alone. A spell can be BOTH always-prepared by a feature
+      // AND on the class's known list — 2024 Paladin's Smite grants Divine Smite
+      // (alwaysPrepared: true) while every Paladin also knows it. Skipping those
+      // threw the always-prepared marking away and left the spellbook copy merely
+      // "prepared", so it silently consumed one of the character's prepared spells.
+      // Savant spells, the case this skip exists for, report alwaysPrepared: false.
+      const knownInSpellbook = !spell.alwaysPrepared
+        && this.ddb.character.classSpells.some((cls) =>
+          cls.spells?.some((known) =>
+            known.definition?.id === spell.definition.id && known.countsAsKnownSpell),
+        );
       if (knownInSpellbook) {
         logger.debug(`Skipping feature-granted ${spell.definition.name}: already a known spellbook spell; keeping the prepared spellbook copy.`);
         continue;

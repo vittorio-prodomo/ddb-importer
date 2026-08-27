@@ -528,13 +528,15 @@ export const FEATURE_SPELLS_IGNORE = [
 ];
 
 export const IGNORE_SPELLS_GRANTED_BY_CLASS_FEATURES = [
-  // Both already grant their spell through a Cast activity, but were never listed
-  // here, so the innate copy and its slot-castable twin were parsed on top of the
-  // cached one — three sheet entries for one spell.
-  // NOTE: DDB spells "Paladin’s" with a typographic apostrophe (U+2019); a
-  // straight quote here silently fails to match.
+  // Favored Enemy already grants Hunter's Mark through a Cast activity but was
+  // never listed here, so the innate copy and its slot-castable twin were parsed
+  // on top of the cached one.
+  //
+  // ⚠️ Paladin's Smite deliberately does NOT belong here. Divine Smite is also on
+  // the Paladin's known list, so the grant must reach the always-prepared branch
+  // below to mark the spellbook copy always-prepared; suppressing it here would
+  // leave that copy merely "prepared" and cost the character a prepared spell.
   "Favored Enemy",
-  "Paladin’s Smite",
   "Faithful Summons",
   "Searing Arc Strike",
   "Bewitching Whispers",
