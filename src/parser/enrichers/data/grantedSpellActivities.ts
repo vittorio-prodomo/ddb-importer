@@ -39,12 +39,16 @@ export function buildGrantedSpellCastActivities(
       },
       overrides: {
         addSpellUuid: spell.definition.name,
-        // A cantrip is at will. Only a levelled spell draws on the feature's free
-        // use, and it stays slot-castable — which is the whole reason DDB shipped
-        // a separate twin item alongside it.
+        // A cantrip is at will; only a levelled spell draws on the feature's use.
+        //
+        // ⚠️ Do NOT add addSpellSlotConsume here. It pushes a spellSlots
+        // consumption target, and dnd5e spends every target on the activity, so
+        // the free cast would cost a use AND a slot. Slot casting is already
+        // covered by the Cast activity's own consumption.spellSlot flag — the
+        // shape the long-standing Favored Enemy activity uses.
         ...(isCantrip
           ? { noConsumeTargets: true }
-          : { addItemConsume: true, itemConsumeValue: "1", addSpellSlotConsume: true }),
+          : { addItemConsume: true, itemConsumeValue: "1" }),
         data: {
           spell: {
             spellbook: true,

@@ -31,15 +31,22 @@ test("leaves a cantrip free to cast at will", () => {
   assert.equal(act.overrides.addItemConsume, undefined);
 });
 
-test("spends the granting feature's use for a levelled spell, and still allows a slot", () => {
-  // The slot path is what made DDB's separate twin item necessary; keeping it here
-  // is what lets the twin be dropped.
+test("spends only the granting feature's use for a levelled spell", () => {
   const [act] = buildGrantedSpellCastActivities([levelled("Healing Word")], { castType: CAST });
 
   assert.equal(act.overrides.addItemConsume, true);
   assert.equal(act.overrides.itemConsumeValue, "1");
-  assert.equal(act.overrides.addSpellSlotConsume, true);
   assert.equal(act.overrides.noConsumeTargets, undefined);
+});
+
+test("never adds a spell-slot consumption target to a free cast", () => {
+  // addSpellSlotConsume PUSHES a spellSlots target, and dnd5e spends every target
+  // on the activity, so the free cast would cost a use AND a slot. The Cast
+  // activity's own consumption.spellSlot flag already covers slot casting, which
+  // is how the long-standing Favored Enemy activity is shaped.
+  const [act] = buildGrantedSpellCastActivities([levelled("Healing Word")], { castType: CAST });
+
+  assert.equal(act.overrides.addSpellSlotConsume, undefined);
 });
 
 test("returns nothing for a feature that granted no spells", () => {
