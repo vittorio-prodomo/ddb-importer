@@ -528,15 +528,12 @@ export const FEATURE_SPELLS_IGNORE = [
 ];
 
 export const IGNORE_SPELLS_GRANTED_BY_CLASS_FEATURES = [
-  // Favored Enemy already grants Hunter's Mark through a Cast activity but was
-  // never listed here, so the innate copy and its slot-castable twin were parsed
-  // on top of the cached one.
-  //
-  // ⚠️ Paladin's Smite deliberately does NOT belong here. Divine Smite is also on
-  // the Paladin's known list, so the grant must reach the always-prepared branch
-  // below to mark the spellbook copy always-prepared; suppressing it here would
-  // leave that copy merely "prepared" and cost the character a prepared spell.
-  "Favored Enemy",
+  // ⚠️ Do NOT add Favored Enemy or Paladin's Smite here. Skipping their grant
+  // starves the Cast-activity generator of the spell it needs, so the feature
+  // rebuilds with NO activity and the character silently loses the free casts
+  // (observed on Favored Enemy: 2/2 uses and nothing to spend them on). Their
+  // grant also carries alwaysPrepared, which is what marks the class-list copy
+  // always-prepared rather than costing a preparation.
   "Faithful Summons",
   "Searing Arc Strike",
   "Bewitching Whispers",
