@@ -38,6 +38,7 @@ export { default as InspiringLeader } from "./InspiringLeader";
 export { default as IntuitiveMotion } from "./IntuitiveMotion";
 export { default as LordsAllianceAgent } from "./LordsAllianceAgent";
 export { default as MageSlayer } from "./MageSlayer";
+export { default as MagicInitiate } from "./MagicInitiate";
 export { default as MarkOfSentinel } from "./MarkOfSentinel";
 export { default as MartialAdept } from "./MartialAdept";
 export { default as MedicalIntuition } from "./MedicalIntuition";

@@ -643,7 +643,13 @@ export default abstract class DDBEnricherFactoryMixin {
     }
 
     if (overrideData.addSpellUuid) {
-      await this._addCompendiumSpellToCastActivity(overrideData.addSpellUuid, activity);
+      // Link the spell edition the granting feature belongs to. Defaulting to 2014
+      // silently mislinked 2024 features, and where a pack carries only the 2024
+      // copy of a spell (Toll the Dead) the lookup found nothing and left the
+      // Cast activity with no spell at all.
+      await this._addCompendiumSpellToCastActivity(overrideData.addSpellUuid, activity, {
+        use2024Spells: this.is2024 ?? false,
+      });
     }
 
     if (overrideData.allowMagical) {

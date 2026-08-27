@@ -528,6 +528,12 @@ export const FEATURE_SPELLS_IGNORE = [
 ];
 
 export const IGNORE_SPELLS_GRANTED_BY_CLASS_FEATURES = [
+  // ⚠️ Do NOT add Favored Enemy or Paladin's Smite here. Skipping their grant
+  // starves the Cast-activity generator of the spell it needs, so the feature
+  // rebuilds with NO activity and the character silently loses the free casts
+  // (observed on Favored Enemy: 2/2 uses and nothing to spend them on). Their
+  // grant also carries alwaysPrepared, which is what marks the class-list copy
+  // always-prepared rather than costing a preparation.
   "Faithful Summons",
   "Searing Arc Strike",
   "Bewitching Whispers",
@@ -558,6 +564,15 @@ export const IGNORE_SPELLS_GRANTED_BY_CLASS_FEATURES = [
 
 export const IGNORE_SPELLS_GRANTED_BY_FEATS = [
   "Spellfire Spark",
+  // Magic Initiate grants its spells as Cast activities on the feat (see the
+  // MagicInitiate enricher), which already places a cached copy in the spellbook.
+  // Parsing them here as well would add the innate item and its slot-castable
+  // twin on top, giving three sheet entries for one granted spell.
+  "Magic Initiate (Cleric)",
+  "Magic Initiate (Druid)",
+  "Magic Initiate (Sorcerer)",
+  "Magic Initiate (Warlock)",
+  "Magic Initiate (Wizard)",
 ];
 
 export const NO_GRANTED_SPELL_LIST_FEATURE_2014_INCLUDES = [

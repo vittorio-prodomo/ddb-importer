@@ -30,6 +30,8 @@ export default class DDBFeatEnricher extends DDBEnricherFactoryMixin {
 
   NAME_HINT_INCLUDES: Record<string, any> = {
     "Ritual Caster (": "Ritual Caster",
+    // Covers the Cleric/Druid/Sorcerer/Warlock/Wizard variants in one entry.
+    "Magic Initiate (": "Magic Initiate",
     "Strike of the Giants (": "Strike of the Giants",
     "Strike of the Giants:": "Strike of the Giants",
     "Greater Mark of ": "Greater Mark of",
@@ -48,6 +50,7 @@ export default class DDBFeatEnricher extends DDBEnricherFactoryMixin {
     "Polearm Master - Bonus Attack": FeatEnrichers.PolearmMasterBonusAttack,
     "Squire of Solamnia: Precise Strike": FeatEnrichers.SquireOfSolamniaPreciseStrike,
     "Metamagic Adept": FeatEnrichers.MetamagicAdept,
+    "Magic Initiate": FeatEnrichers.MagicInitiate,
     "Ritual Caster": FeatEnrichers.RitualCaster,
     "Strike of the Giants": FeatEnrichers.StrikeOfTheGiants,
     "Martial Adept: Ambush": ClassEnrichers.Fighter.ManeuverAmbush,

@@ -5,6 +5,7 @@ import { utils, logger, CompendiumHelper } from "../../lib/_module";
 // Import parsing functions
 import { getSpellCastingAbility, hasSpellCastingAbility, convertSpellCastingAbilityId } from "./ability";
 import DDBSpell from "./DDBSpell";
+import { resolveRaceGrantingTrait, isCastActivityRacialTrait } from "./raceSpellLookup";
 import { DICTIONARY, SETTINGS } from "../../config/_module";
 import { DDBDataUtils, DDBModifiers } from "../lib/_module";
 import DDBCharacter from "../DDBCharacter";
@@ -71,16 +72,9 @@ export default class CharacterSpellFactory {
 
     switch (type) {
       case "race": {
-        const match = ddb.character.race.racialTraits.find((t) => {
-          return t.definition.id === id;
-        });
-        if (match) {
-          lookup = {
-            id: match.definition.id,
-            name: match.definition.name,
-            data: match,
-          };
-        }
+        // Handles both the direct trait id and the 2024 lineage case, where the
+        // spell points at the chosen lineage option instead of the trait itself.
+        lookup = resolveRaceGrantingTrait(ddb, id) ?? undefined;
         break;
       }
       case "feat": {
@@ -507,13 +501,20 @@ export default class CharacterSpellFactory {
       // AND redundantly here as feature-granted, where the block below force-marks them
       // always-prepared (see ~40 lines down) — contradicting RAW. generateClassSpells has
       // already imported the authoritative spellbook copy (prepared normally), so drop
-      // this redundant copy. Keyed on the spell definition id + countsAsKnownSpell so
-      // genuine always-prepared grants (which are NOT known spellbook spells) are
-      // unaffected.
-      const knownInSpellbook = this.ddb.character.classSpells.some((cls) =>
-        cls.spells?.some((known) =>
-          known.definition?.id === spell.definition.id && known.countsAsKnownSpell),
-      );
+      // this redundant copy.
+      //
+      // ⚠️ Discriminate on the grant's own alwaysPrepared flag, NOT on
+      // countsAsKnownSpell alone. A spell can be BOTH always-prepared by a feature
+      // AND on the class's known list — 2024 Paladin's Smite grants Divine Smite
+      // (alwaysPrepared: true) while every Paladin also knows it. Skipping those
+      // threw the always-prepared marking away and left the spellbook copy merely
+      // "prepared", so it silently consumed one of the character's prepared spells.
+      // Savant spells, the case this skip exists for, report alwaysPrepared: false.
+      const knownInSpellbook = !spell.alwaysPrepared
+        && this.ddb.character.classSpells.some((cls) =>
+          cls.spells?.some((known) =>
+            known.definition?.id === spell.definition.id && known.countsAsKnownSpell),
+        );
       if (knownInSpellbook) {
         logger.debug(`Skipping feature-granted ${spell.definition.name}: already a known spellbook spell; keeping the prepared spellbook copy.`);
         continue;
@@ -752,6 +753,11 @@ export default class CharacterSpellFactory {
           name: "Racial spell",
           id: spell.componentId,
         };
+      }
+
+      if (isCastActivityRacialTrait(raceInfo.name)) {
+        logger.debug(`Skipping ${spell.definition.name} for ${raceInfo.name}: the Lineage enricher grants it as a Cast activity`);
+        continue;
       }
 
       // add some data for the parsing of the spells into the data structure
