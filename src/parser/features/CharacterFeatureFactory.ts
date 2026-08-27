@@ -16,6 +16,7 @@ import DDBFeature from "./DDBFeature";
 import DDBChoiceFeature from "./DDBChoiceFeature";
 import { DDBDataUtils, SystemHelpers } from "../lib/_module";
 import AdvancementHelper from "../advancements/AdvancementHelper";
+import { classSpellUuids, hideFromSpellbook, matchesGrantingFeature } from "../spells/grantedSpellRows";
 import DDBCharacter from "../DDBCharacter";
 
 interface ISpellsGranted {
@@ -1293,7 +1294,10 @@ export default class CharacterFeatureFactory {
 
       if (this.spellsGranted[type].some((sg) =>
         featuresToCheck.some((f) => {
-          return spell.flags.ddbimporter?.dndbeyond?.lookupName === (foundry.utils.getProperty(f.feature, "flags.ddbimporter.originalName") ?? f.feature.name)
+          return matchesGrantingFeature(
+            spell.flags.ddbimporter?.dndbeyond?.lookupName,
+            (foundry.utils.getProperty(f.feature, "flags.ddbimporter.originalName") as string) ?? f.feature.name,
+          )
           && spell.flags.ddbimporter?.dndbeyond?.lookup?.startsWith(type)
           && f.feature.name === sg.feature;
           // if (f.feature.name !== sg.feature) return false;
@@ -1329,6 +1333,42 @@ export default class CharacterFeatureFactory {
     for (const [type, filters] of Object.entries(this.spellAdvancementsForce)) {
       if (filters.length > 0) {
         await this._addSpellAdvancementTypeWithFilter(type, filters);
+      }
+    }
+
+    this._hideCachedRowsForClassSpells();
+  }
+
+  /**
+   * Keep a granted spell that is ALSO on the character's own class list to a
+   * single sheet row (T191).
+   *
+   * dnd5e creates a cached copy of every Cast activity's spell on the actor —
+   * `ActivitiesTemplate#onCreateActivities`, which fires when the finished
+   * feature is written, long after this parser has run. Nothing here builds that
+   * row, so it can only be suppressed in advance: `CastActivity#displayInSpellbook`
+   * consults `spell.spellbook`, and clearing it drops the cached row from the
+   * spellbook while leaving the cached item — and therefore the free cast on the
+   * granting feature — working.
+   *
+   * Only ever cleared when the class-list copy is there to take over the row.
+   * A grant the character does not otherwise know (Magic Initiate off-list) keeps
+   * its cached row, which is its only spellbook presence.
+   */
+  _hideCachedRowsForClassSpells() {
+    const onClassList = classSpellUuids(this.ddbCharacter._spellParser?._generated?.class ?? []);
+    if (onClassList.size === 0) return;
+
+    for (const feature of this.processed.features) {
+      // During the parse `system.activities` is still a plain object keyed by id —
+      // it only becomes an ActivityCollection once the item is created, so
+      // Object.values is correct here and Array.from would not be.
+      const activities = (foundry.utils.getProperty(feature, "system.activities") ?? {}) as Record<string, any>;
+      for (const activity of Object.values(activities)) {
+        if (activity.type !== "cast") continue;
+        if (!hideFromSpellbook(activity.spell?.uuid, onClassList)) continue;
+        activity.spell.spellbook = false;
+        logger.debug(`Hiding cached spellbook row for ${activity.name} on ${feature.name}: the class-list copy holds the row.`);
       }
     }
   }
