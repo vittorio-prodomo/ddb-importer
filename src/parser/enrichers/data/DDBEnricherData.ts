@@ -168,8 +168,10 @@ export default abstract class DDBEnricherData {
         ? DDBDataUtils.determineActualFeatureId(this.ddbParser.ddbData, s.componentId)
         : s.componentId;
       const lookupType = type === "class" ? "classFeature" : type;
+      // An unresolvable component id yields no lookup at all — a race spell whose
+      // lineage option matches no choice, for instance — so this must not assume one.
       const lookup = CharacterSpellFactory.getDDBSpellLookup(this.ddbParser.ddbData, lookupType, id);
-      if (lookup.name === name) return true;
+      if (lookup?.name === name) return true;
       return false;
     });
     return spells;

@@ -5,6 +5,7 @@ import { utils, logger, CompendiumHelper } from "../../lib/_module";
 // Import parsing functions
 import { getSpellCastingAbility, hasSpellCastingAbility, convertSpellCastingAbilityId } from "./ability";
 import DDBSpell from "./DDBSpell";
+import { resolveRaceGrantingTrait, isCastActivityRacialTrait } from "./raceSpellLookup";
 import { DICTIONARY, SETTINGS } from "../../config/_module";
 import { DDBDataUtils, DDBModifiers } from "../lib/_module";
 import DDBCharacter from "../DDBCharacter";
@@ -71,16 +72,9 @@ export default class CharacterSpellFactory {
 
     switch (type) {
       case "race": {
-        const match = ddb.character.race.racialTraits.find((t) => {
-          return t.definition.id === id;
-        });
-        if (match) {
-          lookup = {
-            id: match.definition.id,
-            name: match.definition.name,
-            data: match,
-          };
-        }
+        // Handles both the direct trait id and the 2024 lineage case, where the
+        // spell points at the chosen lineage option instead of the trait itself.
+        lookup = resolveRaceGrantingTrait(ddb, id) ?? undefined;
         break;
       }
       case "feat": {
@@ -752,6 +746,11 @@ export default class CharacterSpellFactory {
           name: "Racial spell",
           id: spell.componentId,
         };
+      }
+
+      if (isCastActivityRacialTrait(raceInfo.name)) {
+        logger.debug(`Skipping ${spell.definition.name} for ${raceInfo.name}: the Lineage enricher grants it as a Cast activity`);
+        continue;
       }
 
       // add some data for the parsing of the spells into the data structure

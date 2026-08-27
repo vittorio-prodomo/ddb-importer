@@ -528,6 +528,13 @@ export const FEATURE_SPELLS_IGNORE = [
 ];
 
 export const IGNORE_SPELLS_GRANTED_BY_CLASS_FEATURES = [
+  // Both already grant their spell through a Cast activity, but were never listed
+  // here, so the innate copy and its slot-castable twin were parsed on top of the
+  // cached one — three sheet entries for one spell.
+  // NOTE: DDB spells "Paladin’s" with a typographic apostrophe (U+2019); a
+  // straight quote here silently fails to match.
+  "Favored Enemy",
+  "Paladin’s Smite",
   "Faithful Summons",
   "Searing Arc Strike",
   "Bewitching Whispers",
@@ -558,6 +565,15 @@ export const IGNORE_SPELLS_GRANTED_BY_CLASS_FEATURES = [
 
 export const IGNORE_SPELLS_GRANTED_BY_FEATS = [
   "Spellfire Spark",
+  // Magic Initiate grants its spells as Cast activities on the feat (see the
+  // MagicInitiate enricher), which already places a cached copy in the spellbook.
+  // Parsing them here as well would add the innate item and its slot-castable
+  // twin on top, giving three sheet entries for one granted spell.
+  "Magic Initiate (Cleric)",
+  "Magic Initiate (Druid)",
+  "Magic Initiate (Sorcerer)",
+  "Magic Initiate (Warlock)",
+  "Magic Initiate (Wizard)",
 ];
 
 export const NO_GRANTED_SPELL_LIST_FEATURE_2014_INCLUDES = [
