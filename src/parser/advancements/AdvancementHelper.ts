@@ -6,6 +6,7 @@ import { DDBModifiers } from "../lib/_module";
 import TraitAdvancement from "dnd5e/dnd5e/module/documents/advancement/trait.mjs";
 import type CharacterFeatureFactory from "../features/CharacterFeatureFactory";
 import { matchesGrantingFeature } from "../spells/grantedSpellRows";
+import { parseAlwaysPreparedGrant } from "./alwaysPreparedGrant";
 
 function htmlToText(html) {
   // keep html brakes and tabs
@@ -2373,11 +2374,16 @@ export default class AdvancementHelper {
       });
     }
 
-    // You always have the Otto’s Irresistible Dance spell prepared. You can cast it once without a spell slot,
-    const alwaysPreparedRegex = /You always have the (.+?) spell prepared\. You can cast it once without a spell slot|cast (.+?) without expending a spell slot/i;
-    const alwaysPreparedMatch = strippedDescription.match(alwaysPreparedRegex);
-    if (alwaysPreparedMatch) {
-      const spell = (alwaysPreparedMatch[1] ?? alwaysPreparedMatch[2]).toLowerCase().trim();
+    // "You always have the Otto’s Irresistible Dance spell prepared. You can cast it once
+    // without a spell slot," (2014) and "You always have the Divine Smite spell prepared. In
+    // addition, you can cast it without expending a spell slot," (2024) name the spell in the
+    // same sentence but describe the free cast differently. Resolving that is delegated so the
+    // wording cases can be unit-tested — and so a PRONOUN is never taken for a spell name:
+    // "it" resolves to no compendium spell, which silently costs the feature its Cast activity
+    // and leaves the grant to be pushed as a duplicate innate row instead.
+    const alwaysPreparedSpell = parseAlwaysPreparedGrant(strippedDescription);
+    if (alwaysPreparedSpell) {
+      const spell = alwaysPreparedSpell;
       if (!spellsAdded.has(spell)) {
         result.spellGrants.push({
           level: 1,
@@ -3108,7 +3114,14 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
 
 
   static async addSpellAdvancement({ ddbParser, feature, type }: { ddbParser: CharacterFeatureFactory; feature: T5eFeatureMixinDataTypes; type: string }) {
-    if (!("advancements" in feature.system)) return;
+    // ⚠️ `advancement`, SINGULAR — dnd5e's field is an AdvancementCollectionField
+    // (a MappingField, so source data is an object keyed by id, which is exactly
+    // what the write at the end of this method assumes). The guard was spelled
+    // "advancements", which is not a key on any item, so it matched nothing and
+    // this whole method returned immediately for EVERY feature. Verified live:
+    // nine features probed during one import, "advancements" false on all nine,
+    // "advancement" true on all nine.
+    if (!("advancement" in feature.system)) return;
     if (!("activities" in feature.system)) return;
     const advancements = [];
 
