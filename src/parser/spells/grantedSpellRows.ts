@@ -38,13 +38,16 @@ export function matchesGrantingFeature(
 }
 
 /**
- * Compendium uuids of the spells already on the character's own class list.
+ * Compendium uuids of a set of spell rows — the coverage a cached row can defer to.
  *
  * Read from `_stats.compendiumSource`, which `_setCompendiumSource` stamps on
- * every parsed spell — the same uuid a Cast activity points at, so the two sides
- * compare exactly.
+ * every parsed spell and which survives onto the created item — the same uuid a
+ * Cast activity points at, so the two sides compare exactly.
+ *
+ * ⚠️ The CALLER decides what goes in. Never hand it cached rows: a cached row
+ * must not count as the coverage that justifies hiding itself.
  */
-export function classSpellUuids(spells: any[]): Set<string> {
+export function spellSourceUuids(spells: any[]): Set<string> {
   const uuids = new Set<string>();
   for (const spell of spells ?? []) {
     const uuid = spell?._stats?.compendiumSource;
@@ -67,3 +70,43 @@ export function classSpellUuids(spells: any[]): Set<string> {
 export function hideFromSpellbook(spellUuid: string | null | undefined, onClassList: Set<string>): boolean {
   return Boolean(spellUuid) && onClassList.has(spellUuid as string);
 }
+
+/**
+ * Plan the spellbook-visibility changes for one feature's Cast activities.
+ *
+ * Used by the post-import pass, which re-applies the rule after Chris's Premades
+ * has swapped in its own document — for an adopted feature (Paladin's Smite,
+ * Favored Enemy) the parse-time write is discarded, so this is the only place the
+ * change survives.
+ *
+ * Two properties matter as much as the rule itself:
+ *
+ *  - **Idempotent.** The pass runs on every import; re-issuing an update that
+ *    changes nothing churns the document and re-triggers dnd5e's activity hooks.
+ *  - **Reversible, but only for our own edits.** If the spell later stops being
+ *    covered, a row we hid must come back — otherwise the spell disappears from
+ *    the sheet entirely. A row someone else set to `false` (a premade shipping it
+ *    that way) is never ours to restore, so restoration is gated on
+ *    `previouslyHidden`, the record this pass keeps of what it hid.
+ */
+export function planSpellbookRowChanges({ activities, covered, previouslyHidden }: {
+  activities: { id: string; uuid?: string | null; spellbook?: boolean }[];
+  covered: Set<string>;
+  previouslyHidden: string[];
+}): { hide: string[]; restore: string[] } {
+  const ours = new Set(previouslyHidden ?? []);
+  const hide: string[] = [];
+  const restore: string[] = [];
+
+  for (const activity of activities ?? []) {
+    if (!activity?.id || !activity.uuid) continue;
+    const shouldHide = hideFromSpellbook(activity.uuid, covered);
+    const isHidden = activity.spellbook === false;
+
+    if (shouldHide && !isHidden) hide.push(activity.id);
+    else if (!shouldHide && isHidden && ours.has(activity.id)) restore.push(activity.id);
+  }
+
+  return { hide, restore };
+}
+

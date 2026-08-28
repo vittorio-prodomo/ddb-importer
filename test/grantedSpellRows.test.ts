@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert";
 
 import {
-  classSpellUuids,
   hideFromSpellbook,
   matchesGrantingFeature,
   normaliseGrantName,
+  planSpellbookRowChanges,
+  spellSourceUuids,
 } from "../src/parser/spells/grantedSpellRows.ts";
 
 const DIVINE_SMITE = "Compendium.world.ddb-spells.Item.DivineSmite24III";
@@ -39,7 +40,7 @@ test("normalises the HTML entity form of the apostrophe too", () => {
 });
 
 test("collects the compendium uuids of the class list", () => {
-  const uuids = classSpellUuids([
+  const uuids = spellSourceUuids([
     { name: "Divine Smite", _stats: { compendiumSource: DIVINE_SMITE } },
     { name: "Searing Smite", _stats: {} },
     { name: "Wrathful Smite" },
@@ -51,7 +52,7 @@ test("collects the compendium uuids of the class list", () => {
 test("hides the cached copy of a granted spell that is also a class spell", () => {
   // Victus: Divine Smite is granted by Paladin's Smite AND on the Paladin list.
   // The class-list row takes over, so dnd5e's cached row is redundant.
-  const onList = classSpellUuids([{ _stats: { compendiumSource: DIVINE_SMITE } }]);
+  const onList = spellSourceUuids([{ _stats: { compendiumSource: DIVINE_SMITE } }]);
 
   assert.equal(hideFromSpellbook(DIVINE_SMITE, onList), true);
 });
@@ -59,11 +60,108 @@ test("hides the cached copy of a granted spell that is also a class spell", () =
 test("keeps the cached copy when the spell is NOT on the class list", () => {
   // Nigel: Magic Initiate (Cleric) grants Healing Word, which no Wizard list
   // carries. Hiding it here would remove the spell from his sheet entirely.
-  const onList = classSpellUuids([{ _stats: { compendiumSource: DIVINE_SMITE } }]);
+  const onList = spellSourceUuids([{ _stats: { compendiumSource: DIVINE_SMITE } }]);
 
   assert.equal(hideFromSpellbook(HEALING_WORD, onList), false);
 });
 
 test("keeps the cached copy when the activity names no spell", () => {
-  assert.equal(hideFromSpellbook(undefined, classSpellUuids([])), false);
+  assert.equal(hideFromSpellbook(undefined, spellSourceUuids([])), false);
+});
+
+// --- the post-import fixup (T191 option B) -----------------------------------
+// CPR replaces the whole document for the features it adopts, so a spellbook
+// flag written during the parse is discarded. These cases drive the pass that
+// re-applies the same rule once the swap is done.
+
+test("hides a cached row whose spell another row already covers", () => {
+  const plan = planSpellbookRowChanges({
+    activities: [{ id: "a1", uuid: DIVINE_SMITE, spellbook: true }],
+    covered: new Set([DIVINE_SMITE]),
+    previouslyHidden: [],
+  });
+
+  assert.deepEqual(plan, { hide: ["a1"], restore: [] });
+});
+
+test("leaves an uncovered cached row alone", () => {
+  const plan = planSpellbookRowChanges({
+    activities: [{ id: "a1", uuid: HEALING_WORD, spellbook: true }],
+    covered: new Set([DIVINE_SMITE]),
+    previouslyHidden: [],
+  });
+
+  assert.deepEqual(plan, { hide: [], restore: [] });
+});
+
+test("is idempotent — an already-hidden row is not hidden again", () => {
+  // The pass runs on every import; re-issuing the same update would churn the
+  // document and re-trigger dnd5e's activity hooks for no reason.
+  const plan = planSpellbookRowChanges({
+    activities: [{ id: "a1", uuid: DIVINE_SMITE, spellbook: false }],
+    covered: new Set([DIVINE_SMITE]),
+    previouslyHidden: ["a1"],
+  });
+
+  assert.deepEqual(plan, { hide: [], restore: [] });
+});
+
+test("restores a row WE hid once its spell stops being covered", () => {
+  // Otherwise dropping the spell from the class list would leave the cached row
+  // hidden and the spell would vanish from the sheet entirely.
+  const plan = planSpellbookRowChanges({
+    activities: [{ id: "a1", uuid: DIVINE_SMITE, spellbook: false }],
+    covered: new Set(),
+    previouslyHidden: ["a1"],
+  });
+
+  assert.deepEqual(plan, { hide: [], restore: ["a1"] });
+});
+
+test("never restores a row we did not hide ourselves", () => {
+  // A premade (or upstream) may ship spellbook:false deliberately. Only rows we
+  // recorded are ours to put back.
+  const plan = planSpellbookRowChanges({
+    activities: [{ id: "a1", uuid: DIVINE_SMITE, spellbook: false }],
+    covered: new Set(),
+    previouslyHidden: [],
+  });
+
+  assert.deepEqual(plan, { hide: [], restore: [] });
+});
+
+test("ignores a cast activity that names no spell", () => {
+  const plan = planSpellbookRowChanges({
+    activities: [{ id: "a1", uuid: null, spellbook: true }],
+    covered: new Set([DIVINE_SMITE]),
+    previouslyHidden: [],
+  });
+
+  assert.deepEqual(plan, { hide: [], restore: [] });
+});
+
+test("plans across several activities on one feature", () => {
+  // Warpey's Elven Lineage: Longstrider is on his Ranger list, Druidcraft is not.
+  const DRUIDCRAFT = "Compendium.world.ddb-spells.Item.Druidcraft24III";
+  const plan = planSpellbookRowChanges({
+    activities: [
+      { id: "long", uuid: DIVINE_SMITE, spellbook: true },
+      { id: "druid", uuid: DRUIDCRAFT, spellbook: true },
+    ],
+    covered: new Set([DIVINE_SMITE]),
+    previouslyHidden: [],
+  });
+
+  assert.deepEqual(plan, { hide: ["long"], restore: [] });
+});
+
+test("collects source uuids only from the rows handed to it", () => {
+  // The caller filters out cached rows; a cached row must never count as the
+  // coverage that justifies hiding itself.
+  const uuids = spellSourceUuids([
+    { _stats: { compendiumSource: DIVINE_SMITE } },
+    { _stats: { compendiumSource: HEALING_WORD } },
+  ]);
+
+  assert.deepEqual([...uuids].sort(), [DIVINE_SMITE, HEALING_WORD].sort());
 });

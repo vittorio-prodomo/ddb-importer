@@ -16,7 +16,7 @@ import DDBFeature from "./DDBFeature";
 import DDBChoiceFeature from "./DDBChoiceFeature";
 import { DDBDataUtils, SystemHelpers } from "../lib/_module";
 import AdvancementHelper from "../advancements/AdvancementHelper";
-import { classSpellUuids, hideFromSpellbook, matchesGrantingFeature } from "../spells/grantedSpellRows";
+import { hideFromSpellbook, matchesGrantingFeature, spellSourceUuids } from "../spells/grantedSpellRows";
 import DDBCharacter from "../DDBCharacter";
 
 interface ISpellsGranted {
@@ -1356,7 +1356,7 @@ export default class CharacterFeatureFactory {
    * its cached row, which is its only spellbook presence.
    */
   _hideCachedRowsForClassSpells() {
-    const onClassList = classSpellUuids(this.ddbCharacter._spellParser?._generated?.class ?? []);
+    const onClassList = spellSourceUuids(this.ddbCharacter._spellParser?._generated?.class ?? []);
     if (onClassList.size === 0) return;
 
     for (const feature of this.processed.features) {
