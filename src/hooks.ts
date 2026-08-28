@@ -16,6 +16,7 @@ import checkVersion from "./hooks/ready/checkVersion";
 import { loadDDBConfig } from "./hooks/ready/ddbConfig";
 import { anchorInjection } from "./hooks/ready/anchorInjection";
 import { setupUpdateCreatedOrigins } from "./hooks/ready/originFixing";
+import { setupSpellbookRowCollapse } from "./hooks/ready/spellbookRows";
 import DDBEffectHooks from "./hooks/init/DDBEffectHooks";
 
 // monster muncher
@@ -84,6 +85,7 @@ export async function onceReady() {
     activateUpdateHooks();
   }, 500);
 
+  setupSpellbookRowCollapse();
   anchorInjection();
   welcomeMessage();
   logger.info("OnceReady complete");

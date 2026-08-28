@@ -5,6 +5,7 @@ import { DDBBasicActivity } from "../activities/_module";
 import { DDBModifiers } from "../lib/_module";
 import TraitAdvancement from "dnd5e/dnd5e/module/documents/advancement/trait.mjs";
 import type CharacterFeatureFactory from "../features/CharacterFeatureFactory";
+import { matchesGrantingFeature } from "../spells/grantedSpellRows";
 
 function htmlToText(html) {
   // keep html brakes and tabs
@@ -3127,7 +3128,10 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
 
     const spellData = ddbParser.ddbCharacter._spellParser._granted[type]
       .filter((s) =>
-        s.flags.ddbimporter?.dndbeyond?.lookupName === (foundry.utils.getProperty(feature, "flags.ddbimporter.originalName") ?? feature.name)
+        matchesGrantingFeature(
+          s.flags.ddbimporter?.dndbeyond?.lookupName,
+          (foundry.utils.getProperty(feature, "flags.ddbimporter.originalName") as string) ?? feature.name,
+        )
         && s.flags.ddbimporter?.dndbeyond?.lookup?.startsWith(type),
       );
 
