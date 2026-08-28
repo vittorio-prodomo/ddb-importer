@@ -3114,7 +3114,14 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
 
 
   static async addSpellAdvancement({ ddbParser, feature, type }: { ddbParser: CharacterFeatureFactory; feature: T5eFeatureMixinDataTypes; type: string }) {
-    if (!("advancements" in feature.system)) return;
+    // ⚠️ `advancement`, SINGULAR — dnd5e's field is an AdvancementCollectionField
+    // (a MappingField, so source data is an object keyed by id, which is exactly
+    // what the write at the end of this method assumes). The guard was spelled
+    // "advancements", which is not a key on any item, so it matched nothing and
+    // this whole method returned immediately for EVERY feature. Verified live:
+    // nine features probed during one import, "advancements" false on all nine,
+    // "advancement" true on all nine.
+    if (!("advancement" in feature.system)) return;
     if (!("activities" in feature.system)) return;
     const advancements = [];
 
