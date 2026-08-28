@@ -6,6 +6,7 @@ import { DDBModifiers } from "../lib/_module";
 import TraitAdvancement from "dnd5e/dnd5e/module/documents/advancement/trait.mjs";
 import type CharacterFeatureFactory from "../features/CharacterFeatureFactory";
 import { matchesGrantingFeature } from "../spells/grantedSpellRows";
+import { parseAlwaysPreparedGrant } from "./alwaysPreparedGrant";
 
 function htmlToText(html) {
   // keep html brakes and tabs
@@ -2373,11 +2374,16 @@ export default class AdvancementHelper {
       });
     }
 
-    // You always have the Otto’s Irresistible Dance spell prepared. You can cast it once without a spell slot,
-    const alwaysPreparedRegex = /You always have the (.+?) spell prepared\. You can cast it once without a spell slot|cast (.+?) without expending a spell slot/i;
-    const alwaysPreparedMatch = strippedDescription.match(alwaysPreparedRegex);
-    if (alwaysPreparedMatch) {
-      const spell = (alwaysPreparedMatch[1] ?? alwaysPreparedMatch[2]).toLowerCase().trim();
+    // "You always have the Otto’s Irresistible Dance spell prepared. You can cast it once
+    // without a spell slot," (2014) and "You always have the Divine Smite spell prepared. In
+    // addition, you can cast it without expending a spell slot," (2024) name the spell in the
+    // same sentence but describe the free cast differently. Resolving that is delegated so the
+    // wording cases can be unit-tested — and so a PRONOUN is never taken for a spell name:
+    // "it" resolves to no compendium spell, which silently costs the feature its Cast activity
+    // and leaves the grant to be pushed as a duplicate innate row instead.
+    const alwaysPreparedSpell = parseAlwaysPreparedGrant(strippedDescription);
+    if (alwaysPreparedSpell) {
+      const spell = alwaysPreparedSpell;
       if (!spellsAdded.has(spell)) {
         result.spellGrants.push({
           level: 1,
