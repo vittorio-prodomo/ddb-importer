@@ -88,6 +88,11 @@ export default class AdvancementHelper {
 
   static stripDescription(description: string): string {
     const descriptionReplaced = description
+      // Enricher links read as their labels: the description linker rewrites
+      // spell mentions into @UUID[...]{Name} BEFORE the grant regexes run, and
+      // a raw uuid blob matches none of them (bit the dual-pool merge case on
+      // its first live run, 2026-08-29).
+      .replaceAll(/@UUID\[[^\]]+\]\{([^}]+)\}/g, "$1")
       .replaceAll(/<br \/>(?:\s*)*/g, "<br />\n")
       .replaceAll(/<\/p>(?:\s*)*/g, "</p>\n")
       .replaceAll(/<\/dt>(?:\s*)*<dt>/g, "</dt>\n<dt>");
@@ -2853,7 +2858,9 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
     for (const spell of names) {
       const spellDataMatch = spellData.find((s) => {
         const spellName = foundry.utils.getProperty(s, "flags.ddbimporter.originalName") || s.name;
-        return spellName.toLowerCase() === spell.toLowerCase() && foundry.utils.hasProperty(s, "_stats.compendiumSource");
+        // normalised: the wanted name comes from the description (U+2019), the
+        // item side is the normalised import (U+0027) — quirk #21, again.
+        return matchesGrantingFeature(spellName, spell) && foundry.utils.hasProperty(s, "_stats.compendiumSource");
       });
       if (spellDataMatch) {
         const spellName = foundry.utils.getProperty(spellDataMatch, "flags.ddbimporter.originalName") || spellDataMatch.name;
@@ -3236,6 +3243,34 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
       || String(feature.system.uses.max) === "0";
 
     for (const spellGrant of htmlData.spellGrants) {
+      // MERGE CASE (approved-Warpey shape, 2026-08-29): the granted spell is
+      // ALSO on the character's own class list. One item carries both payment
+      // paths — pool + forward on the CLASS spell, granting feature inert. The
+      // parse only STAMPS the class spell (ddbimporter flags survive the CPR
+      // swap; nothing else here does — quirk #23); the post-swap pass
+      // (spellbookRows.ts) enforces the shape via planDualPoolShape.
+      // ⚠️ Deliberately BEFORE the advancement build: this branch must not
+      // depend on the grant resolving to a compendium uuid (which itself once
+      // failed on the apostrophe boundary and silently gated everything).
+      const classSpell = ddbParser.ddbCharacter._spellParser._generated.class.find((cs) =>
+        matchesGrantingFeature(
+          (foundry.utils.getProperty(cs, "flags.ddbimporter.originalName") as string) ?? cs.name,
+          spellGrant.name,
+        ));
+      if (classSpell) {
+        const featureUses = foundry.utils.getProperty(feature, "system.uses.max");
+        const usesMax = featureUses !== undefined && `${featureUses}` !== "" && `${featureUses}` !== "0"
+          ? `${featureUses}`
+          : `${spellGrant.amount || "1"}`;
+        foundry.utils.setProperty(classSpell, "flags.ddbimporter.dualPoolGrant", {
+          uses: usesMax,
+          feature: (foundry.utils.getProperty(feature, "flags.ddbimporter.originalName") as string) ?? feature.name,
+        });
+        ddbParser.spellsGranted[type].push({ feature: feature.name, spells: [spellGrant.name], use2024Spells });
+        logger.info(`Dual-pool grant: ${spellGrant.name} merges onto the class list; ${feature.name} stays inert.`);
+        continue; // no advancement, no feature activity, no feature uses
+      }
+
       const spellGrantAdvancement = await AdvancementHelper.getSpellGrantAdvancement({
         spellGrants: [spellGrant],
         abilities: abilityData.abilities,

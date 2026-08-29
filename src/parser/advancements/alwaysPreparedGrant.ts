@@ -43,6 +43,8 @@ function clean(name: string | undefined | null): string | null {
  */
 export function parseAlwaysPreparedGrant(description: string): string | null {
   if (typeof description !== "string" || description === "") return null;
+  // An @UUID[...]{Name} enricher link reads as its label.
+  description = description.replace(/@UUID\[[^\]]+\]\{([^}]+)\}/g, "$1");
 
   const named = clean(description.match(ALWAYS_PREPARED)?.[1]);
   if (named) return named;
