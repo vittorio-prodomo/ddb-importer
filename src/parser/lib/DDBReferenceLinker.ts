@@ -1,4 +1,5 @@
 import { utils, logger, CompendiumHelper } from "../../lib/_module";
+import { findByNormalisedName, linkCompendiumMentions } from "./spellMentionLinks";
 import { SETTINGS } from "../../config/_module";
 
 const INDEX_COMPENDIUMS = [
@@ -282,25 +283,16 @@ function parseHardCompendiumReferenceTag(type: string, text: string): string {
     return text;
   }
 
-  const referenceRegexReplacer = (_match: string, referenceName: string, postfix: string) => {
-    const cMatch = index.find((f) => f.name.toLowerCase() === referenceName.toLowerCase());
-    const replacedText = cMatch ? `@UUID[${cMatch.uuid}]{${referenceName}}` : referenceName;
-    // console.warn("match", { match, document, prefix, spellName, postfix, compendium: this.spellCompendium.index, cMatch, replacedSpell });
-    return `${replacedText}${postfix}`;
-  };
-
-
+  // Matching + resolution live in spellMentionLinks (pure, node-tested): the
+  // old inline regexes could not match apostrophes, only accepted <strong>
+  // wrappers, and compared the raw U+2019 against the pack's normalised U+0027 —
+  // three independent reasons "Hunter's Mark" in Favored Enemy never linked.
+  const resolve = (name: string) =>
+    findByNormalisedName(index as Iterable<{ name: string; uuid: string }>, name)?.uuid ?? null;
   if (["spell", "spells"].includes(type.toLowerCase())) {
-    // easiest, e.g.wand of fireballs
-    const simpleStrongRegex = /(?:<strong>)([\w\s]*?)(?:<\/strong>)(\s*spell)/gi;
-    text = `${text}`.replaceAll(simpleStrongRegex, referenceRegexReplacer);
-    // <strong>cone of cold</strong> (5 charges)
-    const chargeSpellRegex = /(?:<strong>)([\w\s]*?)(?:<\/strong>)(\s*\(\d* charge)/gi;
-    text = `${text}`.replaceAll(chargeSpellRegex, referenceRegexReplacer);
+    text = linkCompendiumMentions(text, "spell", resolve);
   } else if (["item", "items", "magicitem", "magicitems"].includes(type)) {
-    // easiest, e.g.wand of fireballs
-    const simpleStrongRegex = /(?:<strong>)([\w\s]*?)(?:<\/strong>)(\s*item)/gi;
-    text = `${text}`.replaceAll(simpleStrongRegex, referenceRegexReplacer);
+    text = linkCompendiumMentions(text, "item", resolve);
   }
 
   return text;
