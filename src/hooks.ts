@@ -17,7 +17,7 @@ import { loadDDBConfig } from "./hooks/ready/ddbConfig";
 import { anchorInjection } from "./hooks/ready/anchorInjection";
 import { setupUpdateCreatedOrigins } from "./hooks/ready/originFixing";
 import { setupSpellbookRowCollapse } from "./hooks/ready/spellbookRows";
-import { setupPrimalCompanionActors } from "./hooks/ready/primalCompanionActors";
+import { registerPrimalCompanionQuery, setupPrimalCompanionActors } from "./hooks/ready/primalCompanionActors";
 import DDBEffectHooks from "./hooks/init/DDBEffectHooks";
 
 // monster muncher
@@ -55,6 +55,7 @@ export function init() {
   addActivitiesHooks();
   addTattooConsumable();
   registerTokenizer2FrameLoader();
+  registerPrimalCompanionQuery();
   logger.info("Init complete");
 }
 

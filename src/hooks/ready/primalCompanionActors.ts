@@ -1,5 +1,6 @@
 import { logger } from "../../lib/_module";
 import {
+  decideReconcileRoute,
   planCompanionReconciliation,
   PRIMAL_COMPANION_FORMS,
   type TPrimalCompanionForm,
@@ -14,8 +15,22 @@ import {
  * -- shared by every character that ever summons that form, cloned from the
  * PHB shell once and never touched again.
  *
- * GM-side, single-writer (`activeGM.isSelf`): actor creation and the item
- * write must not race across clients the way a per-client pass would.
+ * GM-side, single-writer: actor creation and the item write must not race
+ * across clients the way a per-client pass would. Two mechanisms make that
+ * true (both added in fix round 1, review findings Critical + Important):
+ *
+ * 1. `ddb-importer.characterProcessDataComplete` is a LOCAL `Hooks.callAll` --
+ *    it only fires on the importing user's own client. A player re-importing
+ *    their own PC never reaches a GM client through the hook alone, so the
+ *    reconcile must be ROUTED to whichever client actually is the active GM
+ *    (`decideReconcileRoute`, `registerPrimalCompanionQuery`) rather than
+ *    silently dropped when the importing client isn't itself the GM.
+ * 2. On the GM client, every reconcile -- whether triggered locally or via
+ *    the query -- is serialized through one global promise chain
+ *    (`queueReconcile`/`inflight`). This is a world-singleton reconcile
+ *    (three actors total, never per-actor), so two imports landing close
+ *    together must not both read an empty `existingForms` and both create
+ *    Land/Sea/Sky.
  */
 
 const PHB_ACTOR_PACK = "dnd-players-handbook.actors";
@@ -31,6 +46,11 @@ const PHB_SHELL_NAMES: Record<TPrimalCompanionForm, string> = {
 // pack (rather than trusting one pack name for both) survives that kind of
 // reshuffle -- the same reasoning the PHB-shell lookup already uses.
 const CPR_LOADOUT_IDENTIFIERS = ["dodge", "genericActions"];
+
+// Registered against CONFIG.Queries in src/types/foundry-globals.d.ts -- keep
+// that literal key in sync with this constant by hand (interface keys can't
+// reference a runtime const).
+const RECONCILE_QUERY_NAME = "ddb-importer.primalCompanionReconcile";
 
 async function resolvePhbShell(form: TPrimalCompanionForm): Promise<Actor.Implementation | null> {
   const pack = game.packs.get(PHB_ACTOR_PACK);
@@ -126,8 +146,16 @@ async function createCompanionActor(form: TPrimalCompanionForm): Promise<string 
   return created.uuid;
 }
 
+/**
+ * The actual business logic. Callers (`queueReconcile`'s chain, invoked from
+ * either the local branch or the GM query handler below) are responsible for
+ * having already established this is running GM-side -- this function no
+ * longer gates on `activeGM.isSelf` itself (fix round 1: that gate used to
+ * live here as a silent `return`, which is exactly the "drop instead of
+ * route" bug the review flagged; the gate is now the routing decision at the
+ * two entry points, not a drop buried in the business logic).
+ */
 async function reconcilePrimalCompanion(actor): Promise<void> {
-  if (!game.users?.activeGM?.isSelf) return;
   if (!actor?.items) return;
 
   const item = actor.items.find((i) => i.identifier === "primal-companion");
@@ -136,7 +164,16 @@ async function reconcilePrimalCompanion(actor): Promise<void> {
   // ⚠️ item.system.activities is an ActivityCollection -- discover the
   // summon activity BY TYPE, never by a hardcoded id (Task 2 mints its own).
   const summonActivity = item.system?.activities?.getByType?.("summon")?.[0];
-  if (!summonActivity) return;
+  if (!summonActivity) {
+    // Task 2's contract is: this item always ships a summon-type activity.
+    // Landing here means that contract broke somewhere upstream -- worth a
+    // diagnosable console line, not a silent no-op.
+    logger.warn(
+      `Primal Companion reconciliation: "${item.name}" on "${actor.name}" has no summon-type activity -- the Task 2 item contract is not met`,
+      { actorId: actor.id, itemId: item.id },
+    );
+    return;
+  }
 
   const existingForms = existingCompanionForms();
   const profiles = summonActivity.profiles ?? [];
@@ -161,10 +198,77 @@ async function reconcilePrimalCompanion(actor): Promise<void> {
   }
 }
 
+/**
+ * Serializes every reconcile through one global promise chain -- this is a
+ * world-singleton reconcile (three actors total, never per-actor), so two
+ * runs landing close together on the GM client (a bulk re-import, two Ranger
+ * PCs back to back, or a local run racing a queried one) must not both read
+ * an empty `existingForms` and both create Land/Sea/Sky. Each run starts
+ * only after its predecessor has fully settled, and re-reads
+ * `existingCompanionForms()` fresh at that point -- so a run that lands
+ * after the singleton already exists just fixes profiles, never re-creates.
+ *
+ * Deliberately never rejects: errors are caught and logged here so the chain
+ * itself is never left in a rejected state that would trip up the next run.
+ */
+let inflight: Promise<void> = Promise.resolve();
+
+function queueReconcile(actor): Promise<void> {
+  const run = inflight
+    .then(() => reconcilePrimalCompanion(actor))
+    .catch((error) => {
+      logger.error("Primal Companion reconciliation failed", { error, actorId: actor?.id });
+    });
+  inflight = run;
+  return run;
+}
+
+/**
+ * GM-side query handler for player-initiated imports (fix round 1, review
+ * finding Critical). Registered at `init` so it's available before this
+ * client's own `ready` sequence finishes -- another client may query it as
+ * soon as this one is the active GM. SELF-VALIDATING: the caller is
+ * untrusted (any user can invoke a `CONFIG.queries` handler, with no
+ * requester identity attached), so this re-derives everything from
+ * `actorId` alone and re-checks `activeGM.isSelf` itself rather than trusting
+ * that whoever called it already confirmed that.
+ */
+export function registerPrimalCompanionQuery(): void {
+  // CONFIG.queries is populated by core before any module's `init` hook runs
+  // (unlike the untyped-JS precedent this follows, `??= {}` here would fail
+  // to type-check against the now-augmented CONFIG.Queries interface, which
+  // requires core's own "dialog"/"confirmTeleportToken" keys too).
+  CONFIG.queries[RECONCILE_QUERY_NAME] = async ({ actorId }) => {
+    if (!game.users?.activeGM?.isSelf) return { ok: false, reason: "not-active-gm" };
+
+    const actor = game.actors.get(actorId);
+    if (!actor) {
+      logger.warn(`Primal Companion reconciliation query: actor "${actorId}" not found`);
+      return { ok: false, reason: "no-actor" };
+    }
+
+    await queueReconcile(actor);
+    return { ok: true };
+  };
+}
+
 export function setupPrimalCompanionActors(): void {
   Hooks.on("ddb-importer.characterProcessDataComplete", ({ actor }) => {
-    reconcilePrimalCompanion(actor).catch((error) => {
-      logger.error("Primal Companion reconciliation failed", { error, actor });
-    });
+    if (!actor?.id) return;
+
+    const gm = game.users?.activeGM;
+    const route = decideReconcileRoute({ activeGMIsSelf: !!gm?.isSelf, hasActiveGM: !!gm });
+
+    if (route === "local") {
+      queueReconcile(actor);
+      return;
+    }
+    if (route === "query" && gm) {
+      gm.query(RECONCILE_QUERY_NAME, { actorId: actor.id }).catch((error) => {
+        logger.error("Primal Companion reconciliation query failed", { error, actorId: actor.id });
+      });
+      return;
+    }
+    logger.warn("Primal Companion reconciliation skipped: no GM is connected", { actorId: actor.id });
   });
 }

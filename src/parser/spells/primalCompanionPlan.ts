@@ -60,3 +60,25 @@ export function planCompanionReconciliation({
 
   return { createForms, profileUpdate: conformant ? null : target };
 }
+
+/**
+ * Where a player-initiated import (`ddb-importer.characterProcessDataComplete`
+ * is a LOCAL `Hooks.callAll` -- it only fires on the importing user's own
+ * client) must route the reconcile to reach a GM client at all. Fix round 1
+ * (review finding, Critical): the previous shape was a bare `if (!activeGM
+ * .isSelf) return;` gate, which silently DROPPED the reconcile for every
+ * player-initiated import instead of routing it -- no GM client ever saw the
+ * event, so nothing ran. This makes the three-way decision explicit and
+ * testable without a Foundry mock: run locally, route through the active
+ * GM's `CONFIG.queries` handler, or (no GM connected at all) skip and say so.
+ */
+export type TReconcileRoute = "local" | "query" | "no-gm";
+
+export function decideReconcileRoute({
+  activeGMIsSelf,
+  hasActiveGM,
+}: { activeGMIsSelf: boolean; hasActiveGM: boolean }): TReconcileRoute {
+  if (activeGMIsSelf) return "local";
+  if (hasActiveGM) return "query";
+  return "no-gm";
+}

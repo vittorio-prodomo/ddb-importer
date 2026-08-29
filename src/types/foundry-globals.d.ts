@@ -103,6 +103,13 @@ declare global {
       _id: string;
       reference?: string;
     }
+
+    interface Queries {
+      // Literal key must match RECONCILE_QUERY_NAME in
+      // src/hooks/ready/primalCompanionActors.ts -- interface keys can't
+      // reference a runtime const, so the two are kept in sync by hand.
+      "ddb-importer.primalCompanionReconcile": (data: { actorId: string }) => Promise<{ ok: boolean; reason?: string }>;
+    }
   }
 
   interface I5eLanguageGroup {
