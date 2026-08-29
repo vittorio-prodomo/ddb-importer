@@ -271,6 +271,16 @@ export const PARSING_CHOICE_FEATURES = {
     "Cosmic Omen",
     "Armor Model",
     "Drake Companion",
+    // FORK PATCH (T2 primal-companion-native): "Beast of the Land/Sea/Sky" are
+    // DDB choice sub-features of Primal Companion. Building/folding them (the
+    // default when parseAllChoiceFeatures is set) drags the legacy
+    // DDBCompanionFactory-derived bonuses/match/profiles from each sub-feature
+    // onto the parent's native Summon activity via DDBChoiceFeature's
+    // "isCompanionFeature(Option)" merge branch, clobbering the enricher's own
+    // shape and pre-populating `profiles` — which Task 3's reconciliation, not
+    // this legacy path, is meant to own. Mirrors the Drake Companion entry
+    // right above, which sidesteps the identical mechanism for the same reason.
+    "Primal Companion",
     "Bond of Fang and Scale",
     "Scholar",
     "Astral Fire",
