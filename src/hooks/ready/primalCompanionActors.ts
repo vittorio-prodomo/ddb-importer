@@ -96,13 +96,24 @@ async function resolveCprLoadout(identifiers: string[]): Promise<Item.Implementa
   return docs;
 }
 
-function existingCompanionForms(): Partial<Record<TPrimalCompanionForm, string>> {
-  const result: Partial<Record<TPrimalCompanionForm, string>> = {};
+interface ExistingCompanionActor {
+  actor: Actor.Implementation;
+  uuid: string;
+}
+
+/**
+ * Scan the world for already-flagged companion actors. Returns the actor
+ * document itself (not just its uuid) so the reconcile can both plan against
+ * it (uuid, current actorLink) and apply a fix directly to it -- no second
+ * lookup needed.
+ */
+function existingCompanionActors(): Partial<Record<TPrimalCompanionForm, ExistingCompanionActor>> {
+  const result: Partial<Record<TPrimalCompanionForm, ExistingCompanionActor>> = {};
   for (const worldActor of game.actors.contents) {
     const form = foundry.utils.getProperty(worldActor, "flags.ddbimporter.primalCompanionForm") as
       TPrimalCompanionForm | undefined;
     if (form && PRIMAL_COMPANION_FORMS.includes(form) && !result[form]) {
-      result[form] = worldActor.uuid;
+      result[form] = { actor: worldActor, uuid: worldActor.uuid };
     }
   }
   return result;
@@ -125,6 +136,13 @@ async function createCompanionActor(form: TPrimalCompanionForm): Promise<string 
   // potentially confusing) once cloned into the world Actors directory.
   delete data.folder;
   foundry.utils.setProperty(data, "flags.ddbimporter.primalCompanionForm", form);
+  // Fix round 2 (review finding): the PHB shell's own prototype token ships
+  // actorLink: true (verified live 2026-08-29). With a linked token, dnd5e's
+  // native Summon activity clones a brand-new PERMANENT world actor per
+  // summon instead of placing an unlinked token+delta -- every summon would
+  // litter the sidebar. Force false regardless of what the shell carries;
+  // never trust the shell's own value for this field.
+  foundry.utils.setProperty(data, "prototypeToken.actorLink", false);
 
   const created = await Actor.create(data) as Actor.Implementation | undefined;
   if (!created) {
@@ -175,9 +193,18 @@ async function reconcilePrimalCompanion(actor): Promise<void> {
     return;
   }
 
-  const existingForms = existingCompanionForms();
+  const existingActors = existingCompanionActors();
+  const existingForms: Partial<Record<TPrimalCompanionForm, string>> = {};
+  const actorLinkStatus: Partial<Record<TPrimalCompanionForm, boolean>> = {};
+  for (const form of PRIMAL_COMPANION_FORMS) {
+    const entry = existingActors[form];
+    if (!entry) continue;
+    existingForms[form] = entry.uuid;
+    actorLinkStatus[form] = foundry.utils.getProperty(entry.actor, "prototypeToken.actorLink") === true;
+  }
+
   const profiles = summonActivity.profiles ?? [];
-  const plan = planCompanionReconciliation({ existingForms, profiles });
+  const plan = planCompanionReconciliation({ existingForms, profiles, actorLinkStatus });
 
   for (const form of plan.createForms) {
     const uuid = await createCompanionActor(form);
@@ -187,13 +214,34 @@ async function reconcilePrimalCompanion(actor): Promise<void> {
   // Re-plan against the now-complete map so a batch created THIS pass is
   // pointed at immediately, rather than deferred to the next import.
   const finalPlan = plan.createForms.length > 0
-    ? planCompanionReconciliation({ existingForms, profiles })
+    ? planCompanionReconciliation({ existingForms, profiles, actorLinkStatus })
     : plan;
 
   if (finalPlan.profileUpdate) {
     await item.update({ [`system.activities.${summonActivity.id}.profiles`]: finalPlan.profileUpdate });
     logger.info("Primal Companion reconciliation: pointed profiles at the world actors", {
       profiles: finalPlan.profileUpdate,
+    });
+  }
+
+  // Mechanical field fix, never identity -- name/img/ownership are untouched
+  // by this or anything else in this pass. Sourced from `plan`, not
+  // `finalPlan`: actorLinkFixes only ever concerns actors that already
+  // existed BEFORE this pass (a form just created above is guaranteed
+  // actorLink: false already, so it can never appear here either way).
+  // The dotted-path key must be a genuinely widened `string`, not a string
+  // LITERAL type -- fvtt-types' update() typing excess-property-checks a
+  // literal computed key against the actor's schema shape and rejects it
+  // (there is no top-level "prototypeToken.actorLink" property), the same
+  // way the profiles update above only type-checks because its key is built
+  // from a real interpolated variable.
+  const actorLinkField = "prototypeToken.actorLink";
+  for (const fix of plan.actorLinkFixes) {
+    const entry = existingActors[fix.form];
+    if (!entry) continue;
+    await entry.actor.update({ [actorLinkField as string]: false });
+    logger.info(`Primal Companion reconciliation: forced actorLink false on the "${fix.form}" world actor`, {
+      uuid: fix.uuid,
     });
   }
 }
@@ -205,7 +253,7 @@ async function reconcilePrimalCompanion(actor): Promise<void> {
  * PCs back to back, or a local run racing a queried one) must not both read
  * an empty `existingForms` and both create Land/Sea/Sky. Each run starts
  * only after its predecessor has fully settled, and re-reads
- * `existingCompanionForms()` fresh at that point -- so a run that lands
+ * `existingCompanionActors()` fresh at that point -- so a run that lands
  * after the singleton already exists just fixes profiles, never re-creates.
  *
  * Deliberately never rejects: errors are caught and logged here so the chain

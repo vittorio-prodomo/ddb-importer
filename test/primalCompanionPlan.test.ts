@@ -56,3 +56,46 @@ test("has nowhere to route when no GM is connected at all", () => {
 test("activeGMIsSelf takes priority even if hasActiveGM is inconsistently false", () => {
   assert.equal(decideReconcileRoute({ activeGMIsSelf: true, hasActiveGM: false }), "local");
 });
+
+// Fix round 2 (review finding): a linked prototype token makes dnd5e's
+// native summon clone a NEW permanent world actor per use instead of
+// placing an unlinked token+delta. actorLinkFixes is the mechanical-field
+// self-heal for a hand-edit or stale actor -- never touches identity.
+test("a flagged actor with actorLink still true gets a fix op for exactly that field", () => {
+  const conformantProfiles = [
+    { name: "", uuid: "Actor.aaa" }, { name: "", uuid: "Actor.bbb" }, { name: "", uuid: "Actor.ccc" },
+  ];
+  const plan = planCompanionReconciliation({
+    existingForms: FORMS,
+    profiles: conformantProfiles,
+    actorLinkStatus: { land: true, sea: false, sky: false },
+  });
+  assert.deepEqual(plan.actorLinkFixes, [{ form: "land", uuid: "Actor.aaa" }]);
+});
+
+test("actorLink already false on every existing actor is a no-op", () => {
+  const conformantProfiles = [
+    { name: "", uuid: "Actor.aaa" }, { name: "", uuid: "Actor.bbb" }, { name: "", uuid: "Actor.ccc" },
+  ];
+  const plan = planCompanionReconciliation({
+    existingForms: FORMS,
+    profiles: conformantProfiles,
+    actorLinkStatus: { land: false, sea: false, sky: false },
+  });
+  assert.deepEqual(plan.actorLinkFixes, []);
+});
+
+test("actorLinkStatus omitted entirely defaults every existing actor to conformant", () => {
+  const plan = planCompanionReconciliation({ existingForms: FORMS, profiles: [] });
+  assert.deepEqual(plan.actorLinkFixes, []);
+});
+
+test("a form that doesn't exist yet is never proposed as an actorLink fix", () => {
+  const plan = planCompanionReconciliation({
+    existingForms: { land: "Actor.aaa" },
+    profiles: [],
+    actorLinkStatus: { land: true },
+  });
+  // land exists and is flagged true -> gets fixed; sea/sky don't exist -> never proposed
+  assert.deepEqual(plan.actorLinkFixes, [{ form: "land", uuid: "Actor.aaa" }]);
+});
