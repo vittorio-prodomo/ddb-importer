@@ -17,6 +17,7 @@ import { loadDDBConfig } from "./hooks/ready/ddbConfig";
 import { anchorInjection } from "./hooks/ready/anchorInjection";
 import { setupUpdateCreatedOrigins } from "./hooks/ready/originFixing";
 import { setupSpellbookRowCollapse } from "./hooks/ready/spellbookRows";
+import { setupPrimalCompanionActors } from "./hooks/ready/primalCompanionActors";
 import DDBEffectHooks from "./hooks/init/DDBEffectHooks";
 
 // monster muncher
@@ -86,6 +87,7 @@ export async function onceReady() {
   }, 500);
 
   setupSpellbookRowCollapse();
+  setupPrimalCompanionActors();
   anchorInjection();
   welcomeMessage();
   logger.info("OnceReady complete");
