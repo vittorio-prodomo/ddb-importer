@@ -24,8 +24,6 @@ export { default as NaturesVeil } from "./NaturesVeil";
 export { default as OmenOfDoom } from "./OmenOfDoom";
 export { default as PlanarWarrior } from "./PlanarWarrior";
 export { default as PrimalCompanion } from "./PrimalCompanion";
-export { default as PrimalCompanionRestoreBeast } from "./PrimalCompanionRestoreBeast";
-export { default as PrimalCompanionSummon } from "./PrimalCompanionSummon";
 export { default as RangerSpells } from "./RangerSpells";
 export { default as SealedFate } from "./SealedFate";
 export { default as ShadowyDodge } from "./ShadowyDodge";
