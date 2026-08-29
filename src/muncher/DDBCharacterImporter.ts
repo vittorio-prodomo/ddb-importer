@@ -877,7 +877,20 @@ ${item.system.description.chat}
     await this.actor.deleteEmbeddedDocuments("Item", [], {
       deleteAll: true,
     });
-    await this.actor.deleteEmbeddedDocuments("ActiveEffect", [], { deleteAll: true });
+
+    // Same live-dependents invariant as preActiveEffects() (Task 10 §3.9 fix,
+    // folded in here on re-review): this is the error-rollback path, but it's
+    // still an unconditional ActiveEffect wipe on the SAME actor, so a mid-
+    // import failure while a beast is alive would cascade-kill it through the
+    // identical dnd5e ActiveEffect5e#_onDelete mechanism. Reuses the same
+    // planner and the same scene scan -- one shared decision, two call sites.
+    const existingEffects = this.actor.effects.map((e) => ({ _id: e.id, uuid: e.uuid }));
+    const dependentOnUuids = this.collectDependentOnUuids();
+    const wipePlan = planEffectWipe({ existingEffects, dependentOnUuids });
+    if (wipePlan.deleteIds.length > 0) {
+      await this.actor.deleteEmbeddedDocuments("ActiveEffect", wipePlan.deleteIds);
+    }
+
     // @ts-expect-error - not as UpdateData
     await this.actor.update(this.actorOriginal, { recursive: true, keepId: true });
   }

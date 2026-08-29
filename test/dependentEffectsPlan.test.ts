@@ -72,3 +72,23 @@ test("a dependentOn value that matches no existing effect is simply irrelevant",
   assert.deepEqual(plan.keptIds, []);
   assert.deepEqual(plan.deleteIds, ["eff1"]);
 });
+
+// DDBCharacterImporter#resetActor (the error-rollback path) reuses this exact
+// planner too (Task 10 §3.9 fold-in, review re-round): a mid-import failure
+// while a beast is alive must not cascade-kill it via resetActor()'s own
+// wipe any more than a normal re-import may. Nothing about the decision
+// differs between the two call sites -- same shape in, same shape out -- so
+// this is the same scenario as the very first test above, named for the
+// second caller to make that shared coverage explicit rather than implicit.
+test("the rollback path's own effect list gets the identical keep/delete split", () => {
+  const rollbackEffects = [
+    { _id: "marker1", uuid: "Actor.warpey.ActiveEffect.marker1" },
+    { _id: "someOtherEffect", uuid: "Actor.warpey.ActiveEffect.someOtherEffect" },
+  ];
+  const plan = planEffectWipe({
+    existingEffects: rollbackEffects,
+    dependentOnUuids: new Set(["Actor.warpey.ActiveEffect.marker1"]),
+  });
+  assert.deepEqual(plan.keptIds, ["marker1"]);
+  assert.deepEqual(plan.deleteIds, ["someOtherEffect"]);
+});

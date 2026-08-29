@@ -23,10 +23,17 @@
  * live-dependent effect an actor might carry, from any source, not just
  * this one feature.
  *
- * Pure: takes plain snapshots, returns a plan. The caller
- * (`DDBCharacterImporter#preActiveEffects`) owns every side effect --
- * scanning `game.scenes` for `dependentOn` references, and issuing the
- * actual `deleteEmbeddedDocuments` call with the surviving ids.
+ * Pure: takes plain snapshots, returns a plan. The caller owns every side
+ * effect -- scanning `game.scenes` for `dependentOn` references, and issuing
+ * the actual `deleteEmbeddedDocuments` call with the surviving ids. Two call
+ * sites share this exact decision: `DDBCharacterImporter#preActiveEffects`
+ * (the normal-path wipe) and `DDBCharacterImporter#resetActor` (the
+ * error-rollback path, folded in on re-review -- it carried the identical
+ * unconditional `deleteAll: true` wipe on the same actor, so a mid-import
+ * failure while a beast was alive would cascade-kill it too). Neither call
+ * site has its own path-specific logic here; both just call
+ * `collectDependentOnUuids()` + `planEffectWipe()` the same way, so the tests
+ * below cover both by covering the one shared function.
  */
 
 export interface DependentEffectSnapshot {
