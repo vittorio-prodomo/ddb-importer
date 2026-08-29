@@ -51,3 +51,10 @@ test("collapses whitespace so a line-wrapped description still matches", () => {
 
   assert.equal(parseAlwaysPreparedGrant(desc), "divine smite");
 });
+
+test("reads through an @UUID enricher link — the linker runs before the grant parser", () => {
+  const desc = "You always have the @UUID[Compendium.world.ddb-spells.Item.HuntersMark14III]{Hunter’s Mark} spell prepared. "
+    + "You can cast it twice without expending a spell slot.";
+
+  assert.equal(parseAlwaysPreparedGrant(desc), "hunter’s mark");
+});

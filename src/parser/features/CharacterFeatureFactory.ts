@@ -1303,7 +1303,9 @@ export default class CharacterFeatureFactory {
           // if (f.feature.name !== sg.feature) return false;
           // return sg.use2024Spells ? spell.system.source.rules === "2024" : spell.system.source.rules === "2014";
         })
-        && sg.spells.includes(spellName.toLowerCase()))
+        // normalised: the grant side comes from the description (U+2019), the
+        // spell side from the normalised item name (U+0027) — quirk #21.
+        && sg.spells.some((g) => matchesGrantingFeature(g, spellName)))
       ) {
         logger.debug(`Spell ${spell.name} already granted via feature, skipping`);
         continue;

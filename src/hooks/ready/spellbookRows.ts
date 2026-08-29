@@ -1,5 +1,6 @@
 import { logger } from "../../lib/_module";
-import { planSpellbookRowChanges, spellSourceUuids } from "../../parser/spells/grantedSpellRows";
+import { normaliseGrantName, planSpellbookRowChanges, spellSourceUuids } from "../../parser/spells/grantedSpellRows";
+import { PICKER_EXTRA_HIDES, planDualPoolShape } from "../../parser/spells/dualPoolShape";
 
 const HIDDEN_ROWS_FLAG = "hiddenCachedSpellRows";
 
@@ -63,12 +64,91 @@ async function collapseCachedSpellRows(actor): Promise<void> {
   }
 }
 
+function slugify(name: string): string {
+  return `${name}`.toLowerCase().replace(/[’']/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/**
+ * Enforce the vanilla dual-pool shape on every spell the parse stamped with
+ * `flags.ddbimporter.dualPoolGrant` (see AdvancementHelper's merge case). Runs
+ * post-swap and idempotently: a conformant actor produces zero updates.
+ */
+async function enforceDualPoolShapes(actor): Promise<void> {
+  if (!actor?.items) return;
+  for (const item of actor.items) {
+    const stamp = foundry.utils.getProperty(item, "flags.ddbimporter.dualPoolGrant") as
+      import("../../parser/spells/dualPoolShape").DualPoolStamp | undefined;
+    if (!stamp?.feature || item.type !== "spell") continue;
+    const src = item.toObject();
+
+    // Scale formula: prefer the class scale value when it resolves to the
+    // stamped number (the official Hunter's Mark uses @scale.ranger.favored-enemy).
+    let scaleFormula = null;
+    const sourceItem = `${src.system.sourceItem ?? ""}`;
+    if (sourceItem.startsWith("class:")) {
+      const classId = sourceItem.slice(6);
+      const slug = slugify(stamp.feature);
+      const raw = foundry.utils.getProperty(actor.getRollData(), `scale.${classId}.${slug}`) as any;
+      const value = Number(raw?.value ?? raw);
+      if (Number.isFinite(value) && value === Number(stamp.uses)) scaleFormula = `@scale.${classId}.${slug}`;
+    }
+
+    const extraCprIds = PICKER_EXTRA_HIDES[item.identifier] ?? [];
+    const cprActivityIds = foundry.utils.getProperty(item, "flags.chris-premades.activityIdentifiers") ?? {};
+    const spellSnapshot = {
+      identifier: item.identifier,
+      name: item.name,
+      usesMax: `${src.system.uses?.max ?? ""}`,
+      usesSpent: src.system.uses?.spent ?? 0,
+      usesRecoveryPeriods: (src.system.uses?.recovery ?? []).map((r) => r.period),
+      activities: Object.values(src.system.activities ?? {}).map((a: any) => ({
+        id: a._id,
+        type: a.type,
+        name: a.name ?? "",
+        spellSlot: a.consumption?.spellSlot === true,
+        automationOnly: a.midiProperties?.automationOnly === true,
+        activationType: a.activation?.type,
+      })),
+      extraActivityIds: extraCprIds.map((k) => cprActivityIds[k]).filter(Boolean),
+      scaleFormula,
+    };
+
+    const featureItem = actor.items.find((f) =>
+      ["feat", "feature"].includes(f.type)
+      && normaliseGrantName(foundry.utils.getProperty(f, "flags.ddbimporter.originalName") ?? f.name)
+        === normaliseGrantName(stamp.feature));
+    const featureSnapshot = featureItem ? (() => {
+      const fSrc = featureItem.toObject();
+      const spellUuid = src._stats?.compendiumSource;
+      const grantCastActivityIds = Object.values(fSrc.system.activities ?? {})
+        .filter((a: any) => a.type === "cast"
+          && (a.spell?.uuid === spellUuid
+            || normaliseGrantName(a.name ?? "") === normaliseGrantName(item.name)))
+        .map((a: any) => a._id);
+      return { usesMax: `${fSrc.system.uses?.max ?? ""}`, grantCastActivityIds };
+    })() : null;
+
+    const plan = planDualPoolShape(stamp, spellSnapshot, featureSnapshot);
+    if (plan.spellUpdate) {
+      await item.update(plan.spellUpdate);
+      logger.info(`Dual-pool shape enforced on ${item.name}`, { update: plan.spellUpdate });
+    }
+    if (plan.featureUpdate && featureItem) {
+      await featureItem.update(plan.featureUpdate);
+      logger.info(`Granting feature ${featureItem.name} made inert`, { update: plan.featureUpdate });
+    }
+  }
+}
+
 async function safeCollapse(actor): Promise<void> {
   try {
+    // Shape first: stripping a feature's cast activity lets dnd5e remove its
+    // cached row itself, leaving less for the collapse half to hide.
+    await enforceDualPoolShapes(actor);
     await collapseCachedSpellRows(actor);
   } catch (error) {
     // Never let a cosmetic pass fail an import that otherwise succeeded.
-    logger.error("Failed to collapse cached spell rows", { error, actor });
+    logger.error("Post-swap spell reconciliation failed", { error, actor });
   }
 }
 
