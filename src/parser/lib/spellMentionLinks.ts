@@ -58,14 +58,22 @@ export function linkCompendiumMentions(
  * carry U+2019 (raw DDB), the index side U+0027 (normalised import) — or, for
  * an official compendium, the reverse.
  */
-export function findByNormalisedName<T extends { name: string; uuid?: string }>(
+export function findByNormalisedName<T extends { name: string; uuid?: string; system?: { source?: { rules?: string } } }>(
   entries: Iterable<T>,
   name: string,
+  { preferRules }: { preferRules?: string } = {},
 ): T | undefined {
   const wanted = normaliseGrantName(name);
   if (!wanted) return undefined;
+  let first: T | undefined;
   for (const entry of entries) {
-    if (normaliseGrantName(entry.name) === wanted) return entry;
+    if (normaliseGrantName(entry.name) !== wanted) continue;
+    // Same-name entries exist per edition (the munched pack holds a 2014 and a
+    // 2024 Hunter's Mark). A 2024 feature linking the 2014 text is a
+    // correctness bug, not a preference — prefer the wanted edition, fall back
+    // to the first match when none declares it.
+    if (preferRules && entry.system?.source?.rules === preferRules) return entry;
+    first ??= entry;
   }
-  return undefined;
+  return first;
 }

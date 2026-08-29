@@ -63,3 +63,28 @@ test("item mentions keep their own postfix word", () => {
     /@UUID\[.*Fortress.*\]\{Daern’s Instant Fortress\} item/,
   );
 });
+
+test("prefers the wanted edition among same-named entries", () => {
+  const both = [
+    { name: "Hunter's Mark", uuid: "…14III", system: { source: { rules: "2014" } } },
+    { name: "Hunter's Mark", uuid: "…24III", system: { source: { rules: "2024" } } },
+  ];
+
+  assert.equal(findByNormalisedName(both, "Hunter’s Mark", { preferRules: "2024" })?.uuid, "…24III");
+  assert.equal(findByNormalisedName(both, "Hunter’s Mark", { preferRules: "2014" })?.uuid, "…14III");
+});
+
+test("falls back to the first match when no entry declares the wanted edition", () => {
+  const only2014 = [{ name: "Hunter's Mark", uuid: "…14III", system: { source: { rules: "2014" } } }];
+
+  assert.equal(findByNormalisedName(only2014, "Hunter's Mark", { preferRules: "2024" })?.uuid, "…14III");
+});
+
+test("no preference keeps the old first-match behaviour", () => {
+  const both = [
+    { name: "Hunter's Mark", uuid: "…14III", system: { source: { rules: "2014" } } },
+    { name: "Hunter's Mark", uuid: "…24III", system: { source: { rules: "2024" } } },
+  ];
+
+  assert.equal(findByNormalisedName(both, "Hunter's Mark")?.uuid, "…14III");
+});

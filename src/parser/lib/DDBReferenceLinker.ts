@@ -50,8 +50,8 @@ export async function loadDDBCompendiumIndexes() {
     await CompendiumHelper.loadCompendiumIndex(i, {
       fields: [
         "name",
-        "flags.ddbbimporter.id",
-        "flags.ddbbimporter.originalName",
+        "flags.ddbimporter.id",
+        "flags.ddbimporter.originalName",
         "system.source.rules",
       ],
     });
@@ -274,7 +274,7 @@ function parseLooseRuleReferences(text, superLoose = false) {
   return text;
 }
 
-function parseHardCompendiumReferenceTag(type: string, text: string): string {
+function parseHardCompendiumReferenceTag(type: string, text: string, preferRules?: string): string {
   const index = foundry.utils.hasProperty(CONFIG.DDBI, `compendium.index.${type}`)
     ? foundry.utils.getProperty(CONFIG.DDBI, `compendium.index.${type}`)
     : undefined;
@@ -288,7 +288,7 @@ function parseHardCompendiumReferenceTag(type: string, text: string): string {
   // wrappers, and compared the raw U+2019 against the pack's normalised U+0027 —
   // three independent reasons "Hunter's Mark" in Favored Enemy never linked.
   const resolve = (name: string) =>
-    findByNormalisedName(index as Iterable<{ name: string; uuid: string }>, name)?.uuid ?? null;
+    findByNormalisedName(index as Iterable<{ name: string; uuid: string }>, name, { preferRules })?.uuid ?? null;
   if (["spell", "spells"].includes(type.toLowerCase())) {
     text = linkCompendiumMentions(text, "spell", resolve);
   } else if (["item", "items", "magicitem", "magicitems"].includes(type)) {
@@ -475,9 +475,18 @@ export function parseToHitRoll({ text, document } = {}) {
 
 }
 
-export function parseTags(text) {
+export function parseTags(text, { preferRules }: { preferRules?: string } = {}) {
+  // Default the edition preference to the world's rules version: a modern-rules
+  // world reading the 2014 copy of a same-named spell is a correctness bug.
+  if (preferRules === undefined) {
+    try {
+      preferRules = (game.settings.get("dnd5e", "rulesVersion" as never) as unknown as string) === "modern" ? "2024" : "2014";
+    } catch (_err) {
+      preferRules = undefined;
+    }
+  }
   for (const tag of ["spell", "item", "spells", "items"]) {
-    text = parseHardCompendiumReferenceTag(tag, text);
+    text = parseHardCompendiumReferenceTag(tag, text, preferRules);
   }
   const tagRegEx = /\[([^\]]+)]{?([^[}]+)}?\[\/([^\]]+)]/g;
   const matches = text.match(tagRegEx);
