@@ -13,6 +13,7 @@ import { DICTIONARY, SETTINGS } from "../config/_module";
 import DDBCharacter, { IDDBCharacterDataStub } from "../parser/DDBCharacter";
 import { DDBDataUtils } from "../parser/lib/_module";
 import { abilityOverrideEffect } from "../effects/abilityOverrides";
+import { planEffectWipe } from "../effects/dependentEffectsPlan";
 import { createInfusedItems, linkSelectedEnchantments } from "../parser/character/infusions";
 import { setConditions } from "../parser/character/conditions";
 import { ExternalAutomations } from "../effects/_module";
@@ -705,6 +706,24 @@ ${item.system.description.chat}
     logger.debug("Finished importing items");
   }
 
+  /**
+   * uuids referenced by SOME token's `flags.dnd5e.dependentOn`, scanned
+   * across every scene in the world -- the same cross-scene pattern the
+   * owned `dnd5e-primal-companion` module's `allScenes()`/
+   * `dependentTokenUuids()` use. Generic: this has no idea what kind of
+   * dependent it's protecting, only that one exists.
+   */
+  collectDependentOnUuids(): Set<string> {
+    const uuids = new Set<string>();
+    for (const scene of game.scenes ?? []) {
+      for (const token of scene.tokens ?? []) {
+        const dependentOn = foundry.utils.getProperty(token, "flags.dnd5e.dependentOn") as string | undefined;
+        if (dependentOn) uuids.add(dependentOn);
+      }
+    }
+    return uuids;
+  }
+
   async preActiveEffects() {
     this.effectBackup = foundry.utils.duplicate(this.actor.effects) as unknown as I5eEffectData[];
     for (const e of this.effectBackup) {
@@ -714,7 +733,32 @@ ${item.system.description.chat}
         if (parent) foundry.utils.setProperty(e, "flags.ddbimporter.type", parent.type);
       }
     }
-    await this.actor.deleteEmbeddedDocuments("ActiveEffect", [], { deleteAll: true });
+
+    // Task 10 (§3.9 fix): a live token dependent (e.g. a summoned beast)
+    // points its flags.dnd5e.dependentOn at one of this actor's effect
+    // uuids. dnd5e's own ActiveEffect5e#_onDelete cascades a deleted
+    // effect's removal onto every tracked dependent (dnd5e.mjs, around line
+    // 25150: `getDependents().forEach(e => e.delete())`, GM-side) -- a
+    // deleted TOKEN cannot be recovered by later recreating the effect it
+    // depended on, so any effect a live token still references must survive
+    // this wipe untouched (same _id, never deleted), not merely get
+    // recreated afterward. Generic: keyed purely on the dependentOn
+    // reference, not on any "Summon:"/Primal-Companion specifics.
+    const existingEffects = this.actor.effects.map((e) => ({ _id: e.id, uuid: e.uuid }));
+    const dependentOnUuids = this.collectDependentOnUuids();
+    const wipePlan = planEffectWipe({ existingEffects, dependentOnUuids });
+
+    // A kept effect never left the actor, so it needs no re-creation later --
+    // drop it from the backup so processActiveEffects() never tries to
+    // re-add a document that's already sitting right there.
+    if (wipePlan.keptIds.length > 0) {
+      this.effectBackup = this.effectBackup.filter((e) => !wipePlan.keptIds.includes(e._id));
+      logger.info("Preserving live-dependent active effects across this wipe", { keptIds: wipePlan.keptIds });
+    }
+
+    if (wipePlan.deleteIds.length > 0) {
+      await this.actor.deleteEmbeddedDocuments("ActiveEffect", wipePlan.deleteIds);
+    }
   }
 
   async processActiveEffects() {
