@@ -25,7 +25,7 @@ export function buildPrimalCompanionActivities() {
   return {
     summon: {
       type: "summon",
-      name: "Primal Companion: Summon",
+      name: "Summon Companion",
       // "special" (not longRest): RAW the summon costs nothing — and Argon's
       // HUD maps special → the Special/free panel, where Vittorio wants it
       // (the T25 CPR-era retype, carried over 2026-08-30). The marker copies
@@ -56,7 +56,7 @@ export function buildPrimalCompanionActivities() {
     },
     restore: {
       type: "heal",
-      name: "Primal Companion: Restore",
+      name: "Restore Companion",
       activation: {
         type: "action",
       },

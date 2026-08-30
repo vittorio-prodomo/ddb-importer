@@ -149,6 +149,15 @@ export default class PrimalCompanion extends DDBEnricherData {
           ddbimporter: {
             ignoreItemForChrisPremades: true,
           },
+          // Concise per-activity HUD tooltips, read by our Argon dnd5e fork
+          // (flags["enhancedcombathud-dnd5e"].activityTooltips[<activity type>])
+          // in place of the whole feature's rules dump.
+          "enhancedcombathud-dnd5e": {
+            activityTooltips: {
+              summon: "<p>Magically summon your primal beast — pick Land, Sea or Sky and its damage type as you place it. No action cost: it appears within 5 feet, shares your initiative (acting right after you) and obeys your commands.</p><p>Summoning while a beast is already out asks before replacing it.</p>",
+              heal: "<p><strong>Magic action.</strong> Touch your fallen beast's body and expend a spell slot (any level) to restore it to life at full HP.</p><p>Only works while the beast lies at 0 HP — with no fallen beast the action refuses before anything is spent.</p>",
+            },
+          },
         },
       },
     };
