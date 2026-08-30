@@ -154,8 +154,10 @@ export default class PrimalCompanion extends DDBEnricherData {
           // in place of the whole feature's rules dump.
           "enhancedcombathud-dnd5e": {
             activityTooltips: {
-              summon: "<p>Magically summon your primal beast — pick Land, Sea or Sky and its damage type as you place it. No action cost: it appears within 5 feet, shares your initiative (acting right after you) and obeys your commands.</p><p>Summoning while a beast is already out asks before replacing it.</p>",
-              heal: "<p><strong>Magic action.</strong> Touch your fallen beast's body and expend a spell slot (any level) to restore it to life at full HP.</p><p>Only works while the beast lies at 0 HP — with no fallen beast the action refuses before anything is spent.</p>",
+              // Rulebook concepts ONLY in player-facing text (Vittorio's standing
+              // rule, 2026-08-30) — no Foundry-mechanics explainers.
+              summon: "<p>Magically summon a primal beast, choosing its stat block — Beast of the Land, Sea, or Sky — and the kind of animal it is. The beast is Friendly to you and your allies and obeys your commands. It vanishes if you die.</p>",
+              heal: "<p>If the beast has died within the last hour, you can take a Magic action to touch it and expend a spell slot. The beast returns to life after 1 minute with all its Hit Points.</p>",
             },
           },
         },
