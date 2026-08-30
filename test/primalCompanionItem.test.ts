@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert";
 import { buildPrimalCompanionActivities } from "../src/parser/enrichers/data/primalCompanionActivities.ts";
 
-test("summon activity is longRest-activated with a permanent duration", () => {
+test("summon activity is special-activated (free, Argon Special panel) with a permanent duration", () => {
   const { summon } = buildPrimalCompanionActivities();
   assert.equal(summon.type, "summon");
-  assert.equal(summon.activation.type, "longRest");
+  assert.equal(summon.activation.type, "special");
   // the marker trap: midi copies this duration onto its Summon marker
   assert.notEqual(summon.duration?.units ?? "", "");
   assert.equal(summon.profiles.length, 0); // reconciliation owns the pointers

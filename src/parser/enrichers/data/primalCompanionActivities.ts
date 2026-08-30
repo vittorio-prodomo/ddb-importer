@@ -26,8 +26,12 @@ export function buildPrimalCompanionActivities() {
     summon: {
       type: "summon",
       name: "Primal Companion: Summon",
+      // "special" (not longRest): RAW the summon costs nothing — and Argon's
+      // HUD maps special → the Special/free panel, where Vittorio wants it
+      // (the T25 CPR-era retype, carried over 2026-08-30). The marker copies
+      // the DURATION below, never the activation, so the perm trap is safe.
       activation: {
-        type: "longRest",
+        type: "special",
       },
       duration: {
         units: "perm",
