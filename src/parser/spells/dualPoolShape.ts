@@ -116,6 +116,13 @@ export function planDualPoolShape(
 
   // --- the forward --------------------------------------------------------
   const slot = spell.activities.find((a) => a.type !== "forward" && a.spellSlot);
+
+  // A full-list import row's base activity carries midi's auto-label ("Midi
+  // Use"). Once the row is THE row for a grant, that label is player-facing —
+  // give it the spell's name, like the granted rows already have.
+  if (slot && (!slot.name || slot.name === "Midi Use")) {
+    spellUpdate[`system.activities.${slot.id}.name`] = spell.name;
+  }
   const fwdId = forwardActivityId(spell.identifier);
   const existingForward = spell.activities.find((a) => a.type === "forward");
   if (slot && !existingForward) {

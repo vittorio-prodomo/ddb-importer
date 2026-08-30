@@ -133,3 +133,15 @@ test("the feature pool survives while another activity still spends it", () => {
   const plan = planDualPoolShape(STAMP, bareSpell(), feature);
   assert.deepEqual(plan.featureUpdate, { "system.activities.-=ylNjbzBDWxqOgjJG": null });
 });
+
+test("midi's auto-label on the slot activity is replaced by the spell's name", () => {
+  const plan = planDualPoolShape(STAMP, bareSpell({
+    activities: [{ ...slotAct, name: "Midi Use" }, moveAct],
+  }), null);
+  assert.equal(plan.spellUpdate["system.activities.dnd5eactivity000.name"], "Hunter's Mark");
+});
+
+test("a properly named slot activity keeps its name", () => {
+  const plan = planDualPoolShape(STAMP, bareSpell(), null);
+  assert.equal(`system.activities.dnd5eactivity000.name` in plan.spellUpdate, false);
+});
