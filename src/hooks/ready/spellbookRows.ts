@@ -1,5 +1,5 @@
 import { logger } from "../../lib/_module";
-import { normaliseGrantName, planSpellbookRowChanges, spellSourceUuids } from "../../parser/spells/grantedSpellRows";
+import { normaliseGrantName, planSpellbookRowChanges, usableSpellSourceUuids } from "../../parser/spells/grantedSpellRows";
 import { PICKER_EXTRA_HIDES, planDualPoolShape } from "../../parser/spells/dualPoolShape";
 
 const HIDDEN_ROWS_FLAG = "hiddenCachedSpellRows";
@@ -23,10 +23,14 @@ const HIDDEN_ROWS_FLAG = "hiddenCachedSpellRows";
 async function collapseCachedSpellRows(actor): Promise<void> {
   if (!actor?.items) return;
 
-  // Coverage = the rows that are NOT cached copies. A cached row must never be
+  // Coverage = the rows that are NOT cached copies — and only the USABLE ones:
+  // an unprepared full-list catalogue row cannot take over a spellbook row
+  // (the Wood-Elf Longstrider bug, 2026-08-30). A cached row must never be
   // the justification for hiding itself.
-  const covered = spellSourceUuids(
-    actor.items.filter((i) => i.type === "spell" && !i.getFlag("dnd5e", "cachedFor")),
+  const covered = usableSpellSourceUuids(
+    actor.items
+      .filter((i) => i.type === "spell" && !i.getFlag("dnd5e", "cachedFor"))
+      .map((i) => ({ _stats: { compendiumSource: i._stats?.compendiumSource }, system: i.system })),
   );
   if (covered.size === 0) return;
 
@@ -101,6 +105,7 @@ async function enforceDualPoolShapes(actor): Promise<void> {
       usesMax: `${src.system.uses?.max ?? ""}`,
       usesSpent: src.system.uses?.spent ?? 0,
       usesRecoveryPeriods: (src.system.uses?.recovery ?? []).map((r) => r.period),
+      prepared: src.system.prepared,
       activities: Object.values(src.system.activities ?? {}).map((a: any) => ({
         id: a._id,
         type: a.type,
@@ -125,7 +130,10 @@ async function enforceDualPoolShapes(actor): Promise<void> {
           && (a.spell?.uuid === spellUuid
             || normaliseGrantName(a.name ?? "") === normaliseGrantName(item.name)))
         .map((a: any) => a._id);
-      return { usesMax: `${fSrc.system.uses?.max ?? ""}`, grantCastActivityIds };
+      const hasOtherPoolConsumers = Object.values(fSrc.system.activities ?? {})
+        .some((a: any) => !grantCastActivityIds.includes(a._id)
+          && (a.consumption?.targets ?? []).some((t: any) => t.type === "itemUses"));
+      return { usesMax: `${fSrc.system.uses?.max ?? ""}`, grantCastActivityIds, hasOtherPoolConsumers };
     })() : null;
 
     const plan = planDualPoolShape(stamp, spellSnapshot, featureSnapshot);

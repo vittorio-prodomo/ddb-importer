@@ -110,3 +110,49 @@ export function planSpellbookRowChanges({ activities, covered, previouslyHidden 
   return { hide, restore };
 }
 
+
+/**
+ * Compendium uuids of the class-list rows that can actually TAKE OVER a
+ * spellbook row — prepared, always-prepared, or cast by a method that needs no
+ * preparation. An UNPREPARED full-list import row is a catalogue entry: hiding
+ * a granted spell's cached row behind one leaves the sheet with no castable
+ * presence at all (the Wood-Elf Longstrider bug, 2026-08-30).
+ */
+export function usableSpellSourceUuids(spells: any[]): Set<string> {
+  const uuids = new Set<string>();
+  for (const spell of spells ?? []) {
+    const uuid = spell?._stats?.compendiumSource;
+    if (!uuid) continue;
+    const method = spell?.system?.method;
+    const prepared = Number(spell?.system?.prepared ?? 0);
+    if ((method && method !== "spell") || prepared >= 1) uuids.add(uuid);
+  }
+  return uuids;
+}
+
+/**
+ * Reconcile one feature's Cast activities against the class list (the
+ * dual-pool extension of T191, 2026-08-30).
+ *
+ * A free-cast grant (the activity consumes itemUses) whose spell the character
+ * also has as a class row gets the full vanilla dual-pool treatment: the class
+ * row becomes THE row (always-prepared, own pool, forward activity — the
+ * approved Hunter's Mark shape) and the feature's Cast activity is removed, so
+ * no cached row ever exists. Anything else on the class list is only HIDDEN,
+ * and only when the covering row is usable — a catalogue row covers nothing.
+ */
+export function planClassListGrantReconciliation({ activities, onClassList, usable }: {
+  activities: { id: string; uuid?: string | null; consumesItemUses?: boolean }[];
+  onClassList: Set<string>;
+  usable: Set<string>;
+}): { dualPool: { id: string; uuid: string }[]; hide: string[] } {
+  const dualPool: { id: string; uuid: string }[] = [];
+  const hide: string[] = [];
+  for (const activity of activities ?? []) {
+    if (!activity?.id || !activity.uuid) continue;
+    if (!onClassList.has(activity.uuid)) continue;
+    if (activity.consumesItemUses) dualPool.push({ id: activity.id, uuid: activity.uuid });
+    else if (usable.has(activity.uuid)) hide.push(activity.id);
+  }
+  return { dualPool, hide };
+}

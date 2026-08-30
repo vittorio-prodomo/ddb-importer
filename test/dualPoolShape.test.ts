@@ -108,3 +108,28 @@ test("forward ids are deterministic and well-formed", () => {
   assert.match(forwardActivityId("x"), /^[a-zA-Z0-9]{16}$/);
   assert.notEqual(forwardActivityId("hunters-mark"), forwardActivityId("longstrider"));
 });
+
+// --- the dual-pool extension (2026-08-30) -----------------------------------
+
+test("an unprepared adopted class row is promoted to always prepared", () => {
+  const plan = planDualPoolShape(STAMP, bareSpell({ prepared: 0 }), null);
+  assert.equal(plan.spellUpdate["system.prepared"], 2);
+});
+
+test("an already always-prepared row is not touched for preparation", () => {
+  const plan = planDualPoolShape(STAMP, bareSpell({ prepared: 2 }), null);
+  assert.equal("system.prepared" in (plan.spellUpdate ?? {}), false);
+});
+
+test("a snapshot that never sampled prepared state stays silent on it", () => {
+  const plan = planDualPoolShape(STAMP, bareSpell(), null);
+  assert.equal("system.prepared" in (plan.spellUpdate ?? {}), false);
+});
+
+test("the feature pool survives while another activity still spends it", () => {
+  // A lineage granting two limited spells with only one dual-pooled must keep
+  // the pool for the other one's free cast.
+  const feature = { usesMax: "1", grantCastActivityIds: ["ylNjbzBDWxqOgjJG"], hasOtherPoolConsumers: true };
+  const plan = planDualPoolShape(STAMP, bareSpell(), feature);
+  assert.deepEqual(plan.featureUpdate, { "system.activities.-=ylNjbzBDWxqOgjJG": null });
+});

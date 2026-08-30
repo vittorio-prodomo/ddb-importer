@@ -165,3 +165,67 @@ test("collects source uuids only from the rows handed to it", () => {
 
   assert.deepEqual([...uuids].sort(), [DIVINE_SMITE, HEALING_WORD].sort());
 });
+
+// --- the dual-pool extension (2026-08-30) -----------------------------------
+
+import { planClassListGrantReconciliation, usableSpellSourceUuids } from "../src/parser/spells/grantedSpellRows.ts";
+
+const LONGSTRIDER = "Compendium.world.sp.Item.Longstrider24III";
+const DRUIDCRAFT = "Compendium.world.sp.Item.Druidcraft24IIII";
+
+const classRow = (uuid, system) => ({ _stats: { compendiumSource: uuid }, system });
+
+test("an unprepared full-list catalogue row is NOT usable coverage", () => {
+  const usable = usableSpellSourceUuids([classRow(LONGSTRIDER, { method: "spell", prepared: 0 })]);
+  assert.equal(usable.has(LONGSTRIDER), false);
+});
+
+test("prepared, always-prepared and non-preparation methods ARE usable coverage", () => {
+  const usable = usableSpellSourceUuids([
+    classRow("uuid.prepared", { method: "spell", prepared: 1 }),
+    classRow("uuid.always", { method: "spell", prepared: 2 }),
+    classRow("uuid.innate", { method: "innate", prepared: 0 }),
+  ]);
+  assert.deepEqual([...usable].sort(), ["uuid.always", "uuid.innate", "uuid.prepared"]);
+});
+
+test("a free-cast grant on a class-list spell dual-pools instead of hiding", () => {
+  // The Wood-Elf Longstrider case: unprepared catalogue row, free-cast grant.
+  const plan = planClassListGrantReconciliation({
+    activities: [
+      { id: "addLongstrider1I", uuid: LONGSTRIDER, consumesItemUses: true },
+      { id: "addDruidcraft0II", uuid: DRUIDCRAFT, consumesItemUses: false },
+    ],
+    onClassList: new Set([LONGSTRIDER]),
+    usable: new Set(),
+  });
+  assert.deepEqual(plan.dualPool, [{ id: "addLongstrider1I", uuid: LONGSTRIDER }]);
+  assert.deepEqual(plan.hide, []);
+});
+
+test("a no-pool grant covered by a USABLE class row is hidden, as before", () => {
+  const plan = planClassListGrantReconciliation({
+    activities: [{ id: "a1", uuid: "uuid.smite", consumesItemUses: false }],
+    onClassList: new Set(["uuid.smite"]),
+    usable: new Set(["uuid.smite"]),
+  });
+  assert.deepEqual(plan, { dualPool: [], hide: ["a1"] });
+});
+
+test("a no-pool grant covered only by a catalogue row keeps its cached row", () => {
+  const plan = planClassListGrantReconciliation({
+    activities: [{ id: "a1", uuid: "uuid.x", consumesItemUses: false }],
+    onClassList: new Set(["uuid.x"]),
+    usable: new Set(),
+  });
+  assert.deepEqual(plan, { dualPool: [], hide: [] });
+});
+
+test("an off-list grant is untouched either way", () => {
+  const plan = planClassListGrantReconciliation({
+    activities: [{ id: "a1", uuid: DRUIDCRAFT, consumesItemUses: true }],
+    onClassList: new Set([LONGSTRIDER]),
+    usable: new Set([LONGSTRIDER]),
+  });
+  assert.deepEqual(plan, { dualPool: [], hide: [] });
+});

@@ -16,7 +16,7 @@ import DDBFeature from "./DDBFeature";
 import DDBChoiceFeature from "./DDBChoiceFeature";
 import { DDBDataUtils, SystemHelpers } from "../lib/_module";
 import AdvancementHelper from "../advancements/AdvancementHelper";
-import { hideFromSpellbook, matchesGrantingFeature, spellSourceUuids } from "../spells/grantedSpellRows";
+import { matchesGrantingFeature, planClassListGrantReconciliation, spellSourceUuids, usableSpellSourceUuids } from "../spells/grantedSpellRows";
 import DDBCharacter from "../DDBCharacter";
 
 interface ISpellsGranted {
@@ -1338,12 +1338,12 @@ export default class CharacterFeatureFactory {
       }
     }
 
-    this._hideCachedRowsForClassSpells();
+    this._reconcileClassListGrants();
   }
 
   /**
    * Keep a granted spell that is ALSO on the character's own class list to a
-   * single sheet row (T191).
+   * single sheet row (T191; dual-pool extension 2026-08-30).
    *
    * dnd5e creates a cached copy of every Cast activity's spell on the actor —
    * `ActivitiesTemplate#onCreateActivities`, which fires when the finished
@@ -1357,18 +1357,62 @@ export default class CharacterFeatureFactory {
    * A grant the character does not otherwise know (Magic Initiate off-list) keeps
    * its cached row, which is its only spellbook presence.
    */
-  _hideCachedRowsForClassSpells() {
-    const onClassList = spellSourceUuids(this.ddbCharacter._spellParser?._generated?.class ?? []);
+  _reconcileClassListGrants() {
+    const classSpells = this.ddbCharacter._spellParser?._generated?.class ?? [];
+    const onClassList = spellSourceUuids(classSpells);
     if (onClassList.size === 0) return;
+    const usable = usableSpellSourceUuids(classSpells);
 
     for (const feature of this.processed.features) {
       // During the parse `system.activities` is still a plain object keyed by id —
       // it only becomes an ActivityCollection once the item is created, so
       // Object.values is correct here and Array.from would not be.
       const activities = (foundry.utils.getProperty(feature, "system.activities") ?? {}) as Record<string, any>;
-      for (const activity of Object.values(activities)) {
-        if (activity.type !== "cast") continue;
-        if (!hideFromSpellbook(activity.spell?.uuid, onClassList)) continue;
+      const castActivities = Object.values(activities)
+        .filter((a: any) => a.type === "cast")
+        .map((a: any) => ({
+          id: a._id,
+          uuid: a.spell?.uuid,
+          consumesItemUses: (a.consumption?.targets ?? []).some((t: any) => t.type === "itemUses"),
+        }));
+      if (castActivities.length === 0) continue;
+
+      const { dualPool, hide } = planClassListGrantReconciliation({ activities: castActivities, onClassList, usable });
+
+      // Free-cast grants of a spell the class list also carries: the class row
+      // becomes THE row — always prepared, its own pool, a forward activity (the
+      // approved Hunter's Mark shape; the post-swap pass builds it from the
+      // stamp). The feature's Cast activity goes away, so no cached row is born.
+      for (const { id, uuid } of dualPool) {
+        const classSpell = classSpells.find((s: any) => s?._stats?.compendiumSource === uuid);
+        if (!classSpell) continue;
+        const activity = activities[id];
+        foundry.utils.setProperty(classSpell, "flags.ddbimporter.dualPoolGrant", {
+          uses: `${foundry.utils.getProperty(feature, "system.uses.max") || "1"}`,
+          feature: foundry.utils.getProperty(feature, "flags.ddbimporter.originalName") ?? feature.name,
+        });
+        foundry.utils.setProperty(classSpell, "system.prepared", 2);
+        delete activities[id];
+        logger.debug(`Dual-pooling ${activity?.name ?? uuid} onto the class row; Cast activity removed from ${feature.name}.`);
+      }
+
+      // The pool moves with the last free cast: once nothing left on the feature
+      // spends its uses, the (now orphaned) pool goes too.
+      if (dualPool.length > 0) {
+        const remainingConsumers = Object.values(activities)
+          .some((a: any) => (a.consumption?.targets ?? []).some((t: any) => t.type === "itemUses"));
+        if (!remainingConsumers && foundry.utils.getProperty(feature, "system.uses.max")) {
+          foundry.utils.setProperty(feature, "system.uses", { spent: 0, max: "", recovery: [] });
+        }
+      }
+
+      // Everything else covered by a USABLE class row only loses its duplicate
+      // spellbook row. A catalogue row (unprepared full-list import) covers
+      // nothing — hiding behind it left the sheet with no castable presence at
+      // all (the Wood-Elf Longstrider bug, 2026-08-30).
+      for (const id of hide) {
+        const activity = activities[id];
+        if (!activity?.spell) continue;
         activity.spell.spellbook = false;
         logger.debug(`Hiding cached spellbook row for ${activity.name} on ${feature.name}: the class-list copy holds the row.`);
       }

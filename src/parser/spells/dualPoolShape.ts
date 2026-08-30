@@ -49,6 +49,9 @@ export interface SpellSnapshot {
   usesMax: string;
   usesSpent: number;
   usesRecoveryPeriods: string[];
+  /** dnd5e prepared state: 0 unprepared / 1 prepared / 2 always. A dual-pool
+   * grant is by definition an "always have prepared" grant. */
+  prepared?: number;
   activities: {
     id: string;
     type: string;
@@ -68,6 +71,10 @@ export interface FeatureSnapshot {
   usesMax: string;
   /** ids of cast activities on the feature that target this grant's spell */
   grantCastActivityIds: string[];
+  /** does any OTHER activity on the feature still spend the feature's own uses?
+   * (a lineage can grant several limited spells; clearing the pool while one
+   * still draws on it would break that spell's free cast) */
+  hasOtherPoolConsumers?: boolean;
 }
 
 export interface DualPoolPlan {
@@ -96,6 +103,15 @@ export function planDualPoolShape(
       max: wantMax,
       recovery: [{ period: "lr", type: "recoverAll" }],
     };
+  }
+
+  // --- always prepared ----------------------------------------------------
+  // RAW for every dual-pool grant ("you always have the spell prepared").
+  // The class-feature grants (Hunter's Mark, Divine Smite) already arrive as 2
+  // via DDB list membership; a full-list import row adopted by a lineage grant
+  // arrives as 0 and must be promoted.
+  if (spell.prepared !== undefined && spell.prepared !== 2) {
+    spellUpdate["system.prepared"] = 2;
   }
 
   // --- the forward --------------------------------------------------------
@@ -134,7 +150,7 @@ export function planDualPoolShape(
   if (feature) {
     const ops: Record<string, unknown> = {};
     for (const id of feature.grantCastActivityIds) ops[`system.activities.-=${id}`] = null;
-    if (feature.usesMax !== "" && `${feature.usesMax}` !== "0") {
+    if (feature.usesMax !== "" && `${feature.usesMax}` !== "0" && !feature.hasOtherPoolConsumers) {
       ops["system.uses"] = { spent: 0, max: "", recovery: [] };
     }
     if (Object.keys(ops).length) featureUpdate = ops;
