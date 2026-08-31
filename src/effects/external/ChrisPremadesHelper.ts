@@ -3,6 +3,11 @@ import {
   logger,
   utils,
 } from "../../lib/_module";
+import {
+  declaresSleepImmunity,
+  hasSleepImmunityEffect,
+  sleepImmunityEffect,
+} from "../../parser/character/special/sleepImmunity";
 
 interface IChrisPremadesHelper {
   chrisNameOverride?: string | null;
@@ -288,6 +293,31 @@ export default class ChrisPremadesHelper {
     ((this.document.effects ?? []) as I5eEffectData[]).forEach((effect) => {
       if (effect.transfer && this.document.img) effect.img = this.document.img;
     });
+
+    // FORK PATCH (T207): the swap above wipes `document.effects` and replaces them
+    // with CPR's pack-authored set. For Trance that set is the official
+    // `dnd5e.origins24` copy, which carries NO effects at all — so the
+    // sleep-immunity transfer effect the parser attaches
+    // (`character/special/sleepImmunity.ts`) was silently discarded on EVERY
+    // re-import. Nothing caught it: the parser's own diagnostic reports the effect
+    // as "applied", it survives the whole item pipeline, and it dies here, after
+    // the last probe. A re-imported elf simply had no immunity.
+    //
+    // ⚠️ Re-attached here rather than by flagging the feature
+    // `ignoreItemForChrisPremades` (the Archery fix): under 2014 rules the clause
+    // lives on Fey Ancestry, which DOES carry real CPR automation, so an opt-out
+    // would trade this regression for a worse one. Read from `this.original` —
+    // `this.document` has already been overwritten with CPR's description by now.
+    if (declaresSleepImmunity(this.original as any) && !hasSleepImmunityEffect(this.document as any)) {
+      const effect = sleepImmunityEffect(
+        (this.document as any).name,
+        (this.original as any).img,
+      ) as Record<string, unknown>;
+      effect._id = foundry.utils.randomID();
+      if (!Array.isArray((this.document as any).effects)) (this.document as any).effects = [];
+      (this.document as any).effects.push(effect);
+      logger.debug(`Re-attached the sleep immunity effect to ${this.original.name} after the CPR swap`);
+    }
 
     const correctionProperties = foundry.utils.getProperty(CONFIG, `chrisPremades.correctedItems.${this.chrisName}`) as unknown as any;
     if (correctionProperties) {
