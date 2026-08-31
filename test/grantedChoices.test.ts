@@ -8,6 +8,7 @@ import {
   skillReference,
   pluralizeLabel,
   isSpellChoice,
+  isAbilityName,
 } from "../src/parser/character/special/grantedChoices.ts";
 
 /* ---------- the suppression rule ---------- */
@@ -257,7 +258,9 @@ test("the group label says what was chosen", () => {
 });
 
 test("an unlabelled choice stays a bare Chosen, never 'Chosen chosen'", () => {
-  const html = choiceAddendumHtml([{ groupLabel: null, label: "Intelligence", poolId: "p" }]);
+  // ⚠️ NOT an ability name here — those are titled "Spellcasting Ability" now,
+  // which would hide the doubling this test exists to catch.
+  const html = choiceAddendumHtml([{ groupLabel: null, label: "Some Option", poolId: "p" }]);
   assert.match(html!, /<em>Chosen:/);
   assert.doesNotMatch(html!, /Chosen chosen/i);
 });
@@ -309,4 +312,39 @@ test("recognises a spell choice from its label", () => {
   assert.equal(isSpellChoice("Cantrip"), true);
   assert.equal(isSpellChoice("Skill Expertise"), false);
   assert.equal(isSpellChoice(null), false);
+});
+
+/* ---------- the unlabelled ability pick ---------- */
+// DDB gives Magic Initiate's spellcasting-ability choice NO label at all, so it
+// fell back to a bare "Chosen: Intelligence". RAW calls it the spellcasting
+// ability for the feat's spells, so name it that.
+
+test("an unlabelled choice whose value is an ability reads as the spellcasting ability", () => {
+  const html = choiceAddendumHtml([{ groupLabel: null, label: "Intelligence", poolId: "abilities" }]);
+  assert.match(html!, /Spellcasting Ability chosen: <strong>Intelligence/);
+  assert.doesNotMatch(html!, /<em>Chosen:/);
+});
+
+test("an unlabelled choice that is NOT an ability keeps the bare fallback", () => {
+  const html = choiceAddendumHtml([{ groupLabel: null, label: "Increase two scores (+2 / +1)", poolId: "x" }]);
+  assert.match(html!, /<em>Chosen:/);
+  assert.doesNotMatch(html!, /Spellcasting Ability/);
+});
+
+test("a LABELLED ability choice keeps DDB's own wording", () => {
+  // "Choose +2 to Constitution, Intelligence, or Charisma" -> its own heading
+  const html = choiceAddendumHtml([
+    { groupLabel: "+2 to Constitution, Intelligence, or Charisma", label: "Intelligence Score", poolId: "x" },
+  ]);
+  assert.match(html!, /\+2 to Constitution, Intelligence, or Charisma chosen:/);
+  assert.doesNotMatch(html!, /Spellcasting Ability/);
+});
+
+test("recognises the six ability names, and nothing else", () => {
+  for (const a of ["Strength", "Dexterity", "Constitution", "Intelligence", "Wisdom", "Charisma"]) {
+    assert.equal(isAbilityName(a), true, a);
+  }
+  assert.equal(isAbilityName("intelligence"), true, "case-insensitive");
+  assert.equal(isAbilityName("Intelligence Score"), false, "an ASI option is not a bare ability");
+  assert.equal(isAbilityName("Arcana"), false);
 });

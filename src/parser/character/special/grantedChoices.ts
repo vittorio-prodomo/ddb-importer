@@ -260,12 +260,41 @@ export function isSpellChoice(groupLabel: string | null | undefined): boolean {
 
 const UNLABELLED = "Chosen";
 
+/** The six ability scores, as DDB names them. */
+const ABILITY_NAMES = new Set([
+  "strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma",
+]);
+
+/** Is this label a bare ability score? Note "Intelligence Score" (an ASI option) is not. */
+export function isAbilityName(label: string): boolean {
+  return ABILITY_NAMES.has(`${label}`.trim().toLowerCase());
+}
+
+/**
+ * Heading for a choice DDB gave no label to.
+ *
+ * ⚠️ Magic Initiate's spellcasting-ability pick arrives label-less, so it read as
+ * a bare "Chosen: Intelligence". RAW names it — "Intelligence, Wisdom, or Charisma
+ * is your spellcasting ability for this feat's spells" — so a bare ability value
+ * is titled accordingly.
+ *
+ * ⚠️ This IS an inference, drawn from the value because DDB supplies no label. It
+ * is deliberately narrow: only an unlabelled choice whose value is one of the six
+ * bare ability names. An ASI feat's pick resolves to "Intelligence Score" or
+ * "Increase two scores (+2 / +1)" and so keeps the neutral fallback, and any
+ * choice DDB *does* label keeps its own wording.
+ */
+function fallbackGroupLabel(label: string): string {
+  return isAbilityName(label) ? "Spellcasting Ability" : UNLABELLED;
+}
+
+
 export function choiceAddendumHtml(choices: ResolvedChoice[]): string | null {
   if (!choices?.length) return null;
 
   const groups = new Map<string, string[]>();
   for (const choice of choices) {
-    const key = choice.groupLabel ?? UNLABELLED;
+    const key = choice.groupLabel ?? fallbackGroupLabel(choice.label);
     const list = groups.get(key) ?? [];
     // A resolved entity links to its compendium entry, keeping the DDB label as
     // the link text so the sheet still reads "Magic Initiate (Cleric)". Failing
