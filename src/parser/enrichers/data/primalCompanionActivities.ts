@@ -101,3 +101,44 @@ export function buildPrimalCompanionActivities() {
     },
   };
 }
+
+/**
+ * The `additionalActivities` payload the enricher returns for the 2024 feature.
+ *
+ * ⚠️ Extracted 2026-08-31 (T207), and the reason matters. The enricher used to
+ * hand-write this block and hardcoded `type: HEAL` while `buildPrimalCompanion-
+ * Activities` above already said `utility` — the data file and its ONLY consumer
+ * disagreed, and the consumer won. The builder's own test asserted `utility` and
+ * passed the whole time, so nothing caught it: every re-import rebuilt Restore as
+ * a heal, which dnd5e then furnished with a default healing block. Found only by
+ * actually re-importing a live PC.
+ *
+ * Keeping the mapping here, Foundry-free, means a node test can assert the shape
+ * that SHIPS rather than the shape the builder merely proposes. The enricher may
+ * not restate any of these values — it passes this through.
+ */
+export function buildPrimalCompanionRestorePayload(restoreActivityId: string) {
+  const { restore } = buildPrimalCompanionActivities();
+  return {
+    init: {
+      name: restore.name,
+      // ⚠️ Taken FROM the builder, never restated. That restatement was the bug.
+      type: restore.type,
+    },
+    build: {},
+    overrides: {
+      id: restoreActivityId,
+      activationType: restore.activation.type,
+      data: {
+        consumption: restore.consumption,
+        // ⚠️ No `healing` key, deliberately — not even `undefined`. The module
+        // does the healing; a heal-typed activity here printed a flat "200" that
+        // healed nobody and could have hit the wrong creature.
+        uses: { spent: null, max: "" },
+        midiProperties: {
+          confirmTargets: "default",
+        },
+      },
+    },
+  };
+}

@@ -1,5 +1,5 @@
 import DDBEnricherData from "../../data/DDBEnricherData";
-import { buildPrimalCompanionActivities } from "../../data/primalCompanionActivities";
+import { buildPrimalCompanionActivities, buildPrimalCompanionRestorePayload } from "../../data/primalCompanionActivities";
 
 // Stable 16-char activity ids (Foundry's embedded-document id convention —
 // matches the length of the pre-existing "summonPriCSclNe1"). Kept as
@@ -106,31 +106,16 @@ export default class PrimalCompanion extends DDBEnricherData {
       ];
     }
 
-    // 2024: exactly one additional activity — Restore, a plain slot-consuming
-    // Heal. No FORWARD, no per-form utility activities; the summon above is
-    // the only other activity on the item.
-    const { restore } = buildPrimalCompanionActivities();
+    // 2024: exactly one additional activity — Restore, a slot-consuming UTILITY.
+    // No FORWARD, no per-form utility activities; the summon above is the only
+    // other activity on the item.
+    //
+    // ⚠️ The payload is built in the data file and passed through UNTOUCHED.
+    // Restating any of it here is what broke T204: this block hardcoded
+    // `type: HEAL` while the data file said `utility`, so the fix shipped in the
+    // data file and never reached a single re-import.
     return [
-      {
-        init: {
-          name: restore.name,
-          type: DDBEnricherData.ACTIVITY_TYPES.HEAL,
-        },
-        build: {
-        },
-        overrides: {
-          id: RESTORE_ACTIVITY_ID,
-          activationType: restore.activation.type as TActivationCost,
-          data: {
-            consumption: restore.consumption,
-            healing: restore.healing,
-            uses: { spent: null, max: "" },
-            midiProperties: {
-              confirmTargets: "default",
-            },
-          },
-        },
-      },
+      buildPrimalCompanionRestorePayload(RESTORE_ACTIVITY_ID) as unknown as IDDBAdditionalActivity,
     ];
   }
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert";
-import { buildPrimalCompanionActivities } from "../src/parser/enrichers/data/primalCompanionActivities.ts";
+import { buildPrimalCompanionActivities, buildPrimalCompanionRestorePayload } from "../src/parser/enrichers/data/primalCompanionActivities.ts";
 
 test("summon activity is special-activated (free, Argon Special panel) with a permanent duration", () => {
   const { summon } = buildPrimalCompanionActivities();
@@ -37,4 +37,25 @@ test("restore offers NO slot-level choice — the level is pure cost", () => {
 
 test("exactly two activities — no command, no dismiss, no per-type utilities", () => {
   assert.deepEqual(Object.keys(buildPrimalCompanionActivities()), ["summon", "restore"]);
+});
+
+// ⚠️ T207. The three tests above assert what the BUILDER proposes. They all
+// passed while every re-import still produced a `heal`, because the enricher
+// restated the type instead of reading it. These assert the payload the
+// enricher actually ships — the shape that reaches the item.
+test("the shipped restore payload is utility, carrying no healing block", () => {
+  const payload = buildPrimalCompanionRestorePayload("restorePriCSclN1");
+  assert.equal(payload.init.type, "utility", "a heal here re-breaks T204");
+  assert.equal(payload.overrides.id, "restorePriCSclN1");
+  assert.equal(payload.overrides.activationType, "action");
+  assert.ok(!("healing" in payload.overrides.data), "no healing key may be emitted at all");
+});
+
+test("the shipped payload restates nothing — it mirrors the builder", () => {
+  const { restore } = buildPrimalCompanionActivities();
+  const payload = buildPrimalCompanionRestorePayload("restorePriCSclN1");
+  assert.equal(payload.init.type, restore.type);
+  assert.equal(payload.init.name, restore.name);
+  assert.equal(payload.overrides.activationType, restore.activation.type);
+  assert.deepEqual(payload.overrides.data.consumption, restore.consumption);
 });
