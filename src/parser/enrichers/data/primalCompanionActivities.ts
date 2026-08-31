@@ -55,7 +55,20 @@ export function buildPrimalCompanionActivities() {
       },
     },
     restore: {
-      type: "heal",
+      // ⚠️ UTILITY, not "heal", deliberately (2026-08-31). The healing is not
+      // dnd5e's to do: the module heals the beast to full and clears its death
+      // statuses itself, from the marker's own fallen dependent. A heal
+      // activity here only ever printed a flat "200" on the chat card — a
+      // number that healed nobody (the activity declares no target), that lied
+      // about the beast's real max HP, and that WOULD have been misapplied to
+      // whatever the player happened to have targeted.
+      // Knock-on, both checked: midi still fires `midi-qol.RollComplete` for a
+      // utility activity (Workflow.ts — it is the end of the state machine, not
+      // gated on damage), so the module's trigger survives; and Automated
+      // Animations now reaches the caster-side effect through
+      // `dnd5e.postUseActivity` instead of `rollDamageV2`, because that guard
+      // early-returns on `type === "heal"` but not on utility.
+      type: "utility",
       name: "Restore Companion",
       activation: {
         type: "action",
@@ -84,21 +97,6 @@ export function buildPrimalCompanionActivities() {
           max: "9",
         },
         spellSlot: true,
-      },
-      healing: {
-        number: null,
-        denomination: null,
-        bonus: "200",
-        types: ["healing"],
-        custom: {
-          enabled: false,
-          formula: null,
-        },
-        scaling: {
-          mode: "whole",
-          number: 1,
-          formula: "",
-        },
       },
     },
   };
