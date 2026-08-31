@@ -8,27 +8,46 @@ const CAST = "cast";
 const cantrip = (name: string) => ({ definition: { name, level: 0 }, limitedUse: null });
 const levelled = (name: string) => ({ definition: { name, level: 1 }, limitedUse: { maxUses: 1 } });
 
-test("gives every granted spell its own Cast activity, named for the spell", () => {
+test("gives every LEVELLED granted spell its own Cast activity, named for the spell", () => {
   const acts = buildGrantedSpellCastActivities([cantrip("Guidance"), levelled("Healing Word")], { castType: CAST });
 
-  assert.deepEqual(acts.map((a) => a.init.name), ["Guidance", "Healing Word"]);
+  assert.deepEqual(acts.map((a) => a.init.name), ["Healing Word"]);
   assert.ok(acts.every((a) => a.init.type === CAST));
-  assert.deepEqual(acts.map((a) => a.overrides.addSpellUuid), ["Guidance", "Healing Word"]);
+  assert.deepEqual(acts.map((a) => a.overrides.addSpellUuid), ["Healing Word"]);
 });
 
-test("puts every granted spell in the spellbook", () => {
+test("a CANTRIP grant gets no activity at all", () => {
+  // A Cast activity makes dnd5e build a cached row, and a cached row is pinned
+  // into "Additional Spells" whatever its level — so a granted cantrip could
+  // never sort under "Cantrips" while it had one. Left alone here, the normal
+  // spell parser emits it as an ordinary always-prepared cantrip row.
+  assert.deepEqual(buildGrantedSpellCastActivities([cantrip("Druidcraft")], { castType: CAST }), []);
+});
+
+test("a feature granting only cantrips yields nothing", () => {
+  const acts = buildGrantedSpellCastActivities(
+    [cantrip("Guidance"), cantrip("Toll the Dead")], { castType: CAST });
+  assert.deepEqual(acts, []);
+});
+
+test("a mixed grant keeps the levelled spell and drops the cantrips", () => {
+  const acts = buildGrantedSpellCastActivities(
+    [cantrip("Guidance"), cantrip("Toll the Dead"), levelled("Healing Word")], { castType: CAST });
+  assert.deepEqual(acts.map((a) => a.init.name), ["Healing Word"]);
+});
+
+test("puts every levelled granted spell in the spellbook", () => {
   // Without this the cached copy never appears on the sheet and the grant is invisible.
-  const acts = buildGrantedSpellCastActivities([cantrip("Guidance")], { castType: CAST });
+  const acts = buildGrantedSpellCastActivities([levelled("Healing Word")], { castType: CAST });
 
   assert.equal(acts[0].overrides.data.spell.spellbook, true);
 });
 
-test("leaves a cantrip free to cast at will", () => {
-  const [act] = buildGrantedSpellCastActivities([cantrip("Guidance")], { castType: CAST });
-
-  assert.equal(act.build.generateConsumption, false);
-  assert.equal(act.overrides.noConsumeTargets, true);
-  assert.equal(act.overrides.addItemConsume, undefined);
+test("a levelled grant always draws on the feature's pool", () => {
+  const acts = buildGrantedSpellCastActivities([levelled("Healing Word")], { castType: CAST });
+  assert.equal(acts[0].overrides.addItemConsume, true);
+  assert.equal(acts[0].overrides.itemConsumeValue, "1");
+  assert.equal(acts[0].build.generateConsumption, true);
 });
 
 test("spends only the granting feature's use for a levelled spell", () => {
@@ -61,7 +80,8 @@ test("builds one activity per spell even when DDB exports the grant twice", () =
     { castType: CAST },
   );
 
-  assert.deepEqual(acts.map((a) => a.init.name), ["Dancing Lights", "Faerie Fire"]);
+  // Dancing Lights is a cantrip, so it is left to the spell parser entirely.
+  assert.deepEqual(acts.map((a) => a.init.name), ["Faerie Fire"]);
 });
 
 test("keeps the limited-use entry of a duplicated pair, whichever order it arrives in", () => {

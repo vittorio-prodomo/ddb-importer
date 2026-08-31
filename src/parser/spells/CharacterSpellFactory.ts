@@ -755,7 +755,13 @@ export default class CharacterSpellFactory {
         };
       }
 
-      if (isCastActivityRacialTrait(raceInfo.name)) {
+      // ⚠️ Cantrips are NOT skipped (2026-08-31). The Lineage enricher no longer
+      // emits a Cast activity for them, precisely so they arrive here and become
+      // ordinary always-prepared cantrip rows — a cached row can never appear
+      // under "Cantrips", since `_prepareSpellbook` pins anything carrying
+      // `flags.dnd5e.cachedFor` into the "Additional Spells" section regardless
+      // of level. Levelled grants still belong to the enricher.
+      if (spell.definition.level !== 0 && isCastActivityRacialTrait(raceInfo.name)) {
         logger.debug(`Skipping ${spell.definition.name} for ${raceInfo.name}: the Lineage enricher grants it as a Cast activity`);
         continue;
       }
@@ -824,7 +830,10 @@ export default class CharacterSpellFactory {
       }
 
       const featName = featInfo.data?.definition?.name ?? featInfo.data?.name;
-      if (featName && DICTIONARY.parsing.ignoreSpellsGrantedByFeats.includes(featName)) {
+      // Cantrips bypass the ignore list for the same reason as the lineage path
+      // above: their Cast activity is gone, so this is the only way they reach
+      // the sheet — and as a real row they sort under "Cantrips".
+      if (featName && spell.definition.level !== 0 && DICTIONARY.parsing.ignoreSpellsGrantedByFeats.includes(featName)) {
         logger.debug(`Skipping ${spell.definition.name} for ${featInfo.name} as included in feature ignore list`, {
           featName,
           featInfo,

@@ -24,31 +24,38 @@ export function buildGrantedSpellCastActivities(
     }
   }
 
-  return [...byName.values()].map((spell) => {
-    const isCantrip = spell.definition.level === 0;
-
+  // ⚠️ CANTRIPS GET NO ACTIVITY AT ALL (2026-08-31). A Cast activity makes dnd5e
+  // build a cached spell row, and `_prepareSpellbook` pins EVERY row carrying
+  // `flags.dnd5e.cachedFor` into the "item" section — labelled "Additional
+  // Spells" — without ever consulting the spell's level. So a granted cantrip
+  // could never appear under "Cantrips" while it was modelled this way.
+  //
+  // A cantrip grant needs no activity: it is at will, spends nothing, and the
+  // official 2024 content models these lineage/feat items as inert prose. Left
+  // to the normal spell parser (which no longer skips them — see
+  // `CharacterSpellFactory`) it becomes an ordinary always-prepared cantrip row
+  // and lands in its natural section.
+  return [...byName.values()].filter((spell) => spell.definition.level !== 0).map((spell) => {
     return {
       init: {
         name: spell.definition.name,
         type: castType,
       },
       build: {
-        generateConsumption: !isCantrip,
+        generateConsumption: true,
         generateSpell: true,
         generateActivation: true,
       },
       overrides: {
         addSpellUuid: spell.definition.name,
-        // A cantrip is at will; only a levelled spell draws on the feature's use.
         //
         // ⚠️ Do NOT add addSpellSlotConsume here. It pushes a spellSlots
         // consumption target, and dnd5e spends every target on the activity, so
         // the free cast would cost a use AND a slot. Slot casting is already
         // covered by the Cast activity's own consumption.spellSlot flag — the
         // shape the long-standing Favored Enemy activity uses.
-        ...(isCantrip
-          ? { noConsumeTargets: true }
-          : { addItemConsume: true, itemConsumeValue: "1" }),
+        addItemConsume: true,
+        itemConsumeValue: "1",
         data: {
           spell: {
             spellbook: true,
