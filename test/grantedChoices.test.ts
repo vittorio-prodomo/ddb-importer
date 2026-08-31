@@ -119,3 +119,59 @@ test("a rival from the SAME pool still defeats suppression", () => {
   const skillPool = ["Animal Handling", "Persuasion", "Arcana"];
   assert.equal(describesExactlyTheseChoices("Gain Animal Handling or Arcana.", ["Animal Handling"], skillPool), false);
 });
+
+/* ---------- fallback: options that are ENTITIES, not pool members ---------- */
+// Versatile's "Choose an Origin feat" stores the chosen FEAT's own id, which is in
+// no choiceDefinition pool — so pool resolution alone dropped it and the trait kept
+// reading "You gain an Origin feat of your choice." with no answer. This is the
+// T169 link, and it lives in ddb.character.feats.
+
+const DDB_FEAT_CHOICE = {
+  character: {
+    feats: [
+      { definitionId: 1789163, definition: { id: 1789163, name: "Magic Initiate (Cleric)" } },
+      { definitionId: 1789160, definition: { id: 1789160, name: "Lucky" } },
+    ],
+    choices: {
+      race: [{ componentId: 13856145, type: 6, label: "Choose an Origin feat", optionValue: 1789163 }],
+      choiceDefinitions: [],
+    },
+  },
+};
+
+test("an option that names a FEAT resolves through the feats list", () => {
+  const byComponent = resolveChoicesByComponent(DDB_FEAT_CHOICE);
+  assert.deepEqual(byComponent.get(13856145), [
+    { groupLabel: "Origin feat", label: "Magic Initiate (Cleric)", poolId: null },
+  ]);
+});
+
+test("a feat-resolved choice carries no pool, so nothing counts as its rival", () => {
+  const byComponent = resolveChoicesByComponent(DDB_FEAT_CHOICE);
+  assert.equal(byComponent.get(13856145)![0]!.poolId, null);
+  // "You gain an Origin feat of your choice." names nothing -> addendum wanted
+  assert.equal(
+    describesExactlyTheseChoices("You gain an Origin feat of your choice.", ["Magic Initiate (Cleric)"], []),
+    false);
+});
+
+test("a pool match still wins over the feats list", () => {
+  const ddb = {
+    character: {
+      feats: [{ definitionId: 6091, definition: { id: 6091, name: "NOT THIS" } }],
+      choices: {
+        class: [{ componentId: 1, type: 2, label: "Choose a Skill", optionValue: 6091 }],
+        choiceDefinitions: [{ id: "x-2", options: [{ id: 6091, label: "Arcana" }] }],
+      },
+    },
+  };
+  assert.equal(resolveChoicesByComponent(ddb).get(1)![0]!.label, "Arcana");
+});
+
+test("an id in neither pools nor feats is still dropped", () => {
+  const ddb = { character: { feats: [], choices: {
+    race: [{ componentId: 5, type: 6, label: "Choose something", optionValue: 424242 }],
+    choiceDefinitions: [],
+  } } };
+  assert.equal(resolveChoicesByComponent(ddb).has(5), false);
+});

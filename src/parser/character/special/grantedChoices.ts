@@ -61,11 +61,33 @@ export function resolveChoicesByComponent(ddb: any): Map<number, ResolvedChoice[
   const choices = ddb?.character?.choices ?? {};
   const definitions: any[] = Array.isArray(choices.choiceDefinitions) ? choices.choiceDefinitions : [];
 
+  /**
+   * Some options are not pool members at all — they name an ENTITY the character
+   * took. Versatile's "Choose an Origin feat" stores the chosen feat's own id,
+   * which appears in no `choiceDefinition`, so pool lookup alone dropped it and
+   * the trait kept reading "You gain an Origin feat of your choice." with no
+   * answer. That is the T169 link, and it lives in `character.feats`.
+   *
+   * ⚠️ Consulted only AFTER the pools: option ids and feat ids are separate number
+   * spaces and can collide, and the pool is the authoritative answer when it has
+   * one.
+   */
+  const featNames = new Map<number, string>();
+  for (const feat of (ddb?.character?.feats ?? []) as any[]) {
+    const id = feat?.definition?.id ?? feat?.definitionId;
+    const name = feat?.definition?.name;
+    if (id != null && name) featNames.set(Number(id), String(name));
+  }
+
   const labelFor = (optionValue: unknown): { label: string; poolId: string | null } | null => {
     for (const definition of definitions) {
       const hit = (definition?.options ?? []).find((option: any) => option?.id === optionValue);
       if (hit?.label) return { label: String(hit.label), poolId: definition?.id != null ? String(definition.id) : null };
     }
+    const featName = featNames.get(Number(optionValue));
+    // No pool, so nothing can count as this choice's rival — suppression then
+    // depends purely on whether the description already names the entity.
+    if (featName) return { label: featName, poolId: null };
     return null;
   };
 
