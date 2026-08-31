@@ -9,6 +9,7 @@ import {
   pluralizeLabel,
   isSpellChoice,
   isAbilityName,
+  abilityReference,
 } from "../src/parser/character/special/grantedChoices.ts";
 
 /* ---------- the suppression rule ---------- */
@@ -321,7 +322,10 @@ test("recognises a spell choice from its label", () => {
 
 test("an unlabelled choice whose value is an ability reads as the spellcasting ability", () => {
   const html = choiceAddendumHtml([{ groupLabel: null, label: "Intelligence", poolId: "abilities" }]);
-  assert.match(html!, /Spellcasting Ability chosen: <strong>Intelligence/);
+  // the HEADING is what this test is about; the value is now wrapped in a
+  // Reference enricher, which its own test covers
+  assert.match(html!, /Spellcasting Ability chosen:/);
+  assert.match(html!, /Intelligence/);
   assert.doesNotMatch(html!, /<em>Chosen:/);
 });
 
@@ -347,4 +351,31 @@ test("recognises the six ability names, and nothing else", () => {
   assert.equal(isAbilityName("intelligence"), true, "case-insensitive");
   assert.equal(isAbilityName("Intelligence Score"), false, "an ASI option is not a bare ability");
   assert.equal(isAbilityName("Arcana"), false);
+});
+
+/* ---------- abilities link to their rule page too ---------- */
+
+test("an ability label becomes a Reference enricher", () => {
+  assert.equal(abilityReference("Intelligence"), "&amp;Reference[int]{Intelligence}");
+  assert.equal(abilityReference("Charisma"), "&amp;Reference[cha]{Charisma}");
+});
+
+test("only the six bare abilities — an ASI option is not one", () => {
+  assert.equal(abilityReference("Intelligence Score"), null);
+  assert.equal(abilityReference("Increase two scores (+2 / +1)"), null);
+  assert.equal(abilityReference("Arcana"), null);
+});
+
+test("the addendum renders the spellcasting ability as a reference", () => {
+  const html = choiceAddendumHtml([{ groupLabel: null, label: "Intelligence", poolId: "abilities" }]);
+  assert.match(html!, /Spellcasting Ability chosen:/);
+  assert.match(html!, /&amp;Reference\[int\]\{Intelligence\}/);
+});
+
+test("a compendium uuid still outranks an ability reference", () => {
+  const html = choiceAddendumHtml([{
+    groupLabel: "Spell", label: "Intelligence", poolId: null, uuid: "Compendium.p.Item.a",
+  }]);
+  assert.match(html!, /@UUID/);
+  assert.doesNotMatch(html!, /Reference\[/);
 });

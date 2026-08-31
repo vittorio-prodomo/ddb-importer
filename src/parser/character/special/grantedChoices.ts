@@ -260,10 +260,31 @@ export function isSpellChoice(groupLabel: string | null | undefined): boolean {
 
 const UNLABELLED = "Chosen";
 
-/** The six ability scores, as DDB names them. */
-const ABILITY_NAMES = new Set([
-  "strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma",
-]);
+/**
+ * The six ability scores, as DDB names them, against dnd5e's 3-letter keys.
+ *
+ * ⚠️ A constant rather than `CONFIG.DND5E.abilities` for the same reason as the
+ * skills above: that config is localized, and DDB's label is always English.
+ */
+const ABILITY_KEYS: Record<string, string> = {
+  "strength": "str", "dexterity": "dex", "constitution": "con",
+  "intelligence": "int", "wisdom": "wis", "charisma": "cha",
+};
+const ABILITY_NAMES = new Set(Object.keys(ABILITY_KEYS));
+
+/**
+ * An ability label as a dnd5e Reference enricher, linking to its rule page — or
+ * null when the label is not a bare ability ("Intelligence Score" is an ASI
+ * option, not an ability).
+ *
+ * Verified live: all three accepted forms (`int`, `intelligence`, `ability=int`)
+ * resolve to the SAME Intelligence rule page, so the 3-letter key is used for
+ * consistency with the skill references.
+ */
+export function abilityReference(label: string): string | null {
+  const key = ABILITY_KEYS[`${label}`.trim().toLowerCase()];
+  return key ? `&amp;Reference[${key}]{${label}}` : null;
+}
 
 /** Is this label a bare ability score? Note "Intelligence Score" (an ASI option) is not. */
 export function isAbilityName(label: string): boolean {
@@ -301,7 +322,7 @@ export function choiceAddendumHtml(choices: ResolvedChoice[]): string | null {
     // that, a skill links to its rule page. Anything else stays plain.
     const rendered = choice.uuid
       ? `@UUID[${choice.uuid}]{${choice.label}}`
-      : skillReference(choice.label) ?? choice.label;
+      : skillReference(choice.label) ?? abilityReference(choice.label) ?? choice.label;
     if (!list.includes(rendered)) list.push(rendered);
     groups.set(key, list);
   }
