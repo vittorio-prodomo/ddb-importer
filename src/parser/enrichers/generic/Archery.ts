@@ -38,6 +38,22 @@ export default class Archery extends DDBEnricherData {
     };
   }
 
+  /**
+   * ⚠️ DDB grants its OWN `ranged-attacks +2` modifier for this fighting style,
+   * which `EffectGenerator._addWeaponAttackBonuses` turns into a second transfer
+   * effect on the same item. Both use ADD mode, so without this the sheet reads
+   * `"2 + 2"` and every ranged attack silently gets **+4** (T207 — found by
+   * re-importing a live PC; the hand-fixed actor had looked correct for a day).
+   *
+   * Clearing lets ours be the single source: it is unconditional, self-describing,
+   * and is the effect `dnd5e-content-fixups` reads back for the thrown-melee
+   * correction — whereas the generated one exists only while DDB happens to
+   * supply the modifier. Safe to clear wholesale: Archery grants nothing else.
+   */
+  get clearAutoEffects(): boolean {
+    return true;
+  }
+
   get effects(): IDDBEffectHint[] {
     return [
       {
