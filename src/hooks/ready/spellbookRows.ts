@@ -1,6 +1,7 @@
 import { logger } from "../../lib/_module";
 import { normaliseGrantName, planSpellbookRowChanges, usableSpellSourceUuids } from "../../parser/spells/grantedSpellRows";
 import { PICKER_EXTRA_HIDES, planDualPoolShape } from "../../parser/spells/dualPoolShape";
+import { featureNameCandidates, grantingFeatureName, sourceItemKey } from "../../parser/spells/grantSourceItem";
 
 const HIDDEN_ROWS_FLAG = "hiddenCachedSpellRows";
 
@@ -77,6 +78,43 @@ function slugify(name: string): string {
  * `flags.ddbimporter.dualPoolGrant` (see AdvancementHelper's merge case). Runs
  * post-swap and idempotently: a conformant actor produces zero updates.
  */
+/**
+ * Point every granted spell's `system.sourceItem` at the FEATURE that granted it, so
+ * the sheet subtitle names it instead of the actor's spellcasting class. Rationale and
+ * the accepted class-filter trade-off live in `grantSourceItem.ts`.
+ *
+ * Idempotent: a row already pointing at the right feature produces no update.
+ */
+async function enforceGrantSourceItems(actor): Promise<void> {
+  if (!actor?.items) return;
+  for (const item of actor.items) {
+    if (item.type !== "spell") continue;
+    const featureName = grantingFeatureName(item.flags);
+    if (!featureName) continue;
+
+    let featureItem = null;
+    for (const candidate of featureNameCandidates(featureName)) {
+      featureItem = actor.items.find((f) =>
+        ["feat", "feature", "race", "background", "subclass"].includes(f.type)
+        && [f.name, foundry.utils.getProperty(f, "flags.ddbimporter.originalName")]
+          .filter(Boolean)
+          .some((n) => normaliseGrantName(n) === normaliseGrantName(candidate)));
+      if (featureItem) break;
+    }
+    if (!featureItem) continue;
+
+    const key = sourceItemKey({ type: featureItem.type, identifier: featureItem.identifier });
+    // ⚠️ Verify it actually resolves before writing. A sourceItem pointing at nothing
+    // fails silently and leaves the old subtitle in place, which reads as "the change
+    // did not ship" rather than "the identifier was wrong".
+    if (!key || !actor.identifiedItems?.get(key)?.first()) continue;
+    if (item.system.sourceItem === key) continue;
+
+    await item.update({ "system.sourceItem": key });
+    logger.info(`Spell subtitle: ${item.name} now credits ${featureItem.name}`, { sourceItem: key });
+  }
+}
+
 async function enforceDualPoolShapes(actor): Promise<void> {
   if (!actor?.items) return;
   for (const item of actor.items) {
@@ -153,6 +191,7 @@ async function safeCollapse(actor): Promise<void> {
     // Shape first: stripping a feature's cast activity lets dnd5e remove its
     // cached row itself, leaving less for the collapse half to hide.
     await enforceDualPoolShapes(actor);
+    await enforceGrantSourceItems(actor);
     await collapseCachedSpellRows(actor);
   } catch (error) {
     // Never let a cosmetic pass fail an import that otherwise succeeded.
