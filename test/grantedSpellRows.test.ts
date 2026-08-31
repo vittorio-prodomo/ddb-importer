@@ -7,6 +7,9 @@ import {
   normaliseGrantName,
   planSpellbookRowChanges,
   spellSourceUuids,
+  freeCastGrantStamp,
+  planOffListGrantReconciliation,
+  asDualPoolRowSpell,
 } from "../src/parser/spells/grantedSpellRows.ts";
 
 const DIVINE_SMITE = "Compendium.world.ddb-spells.Item.DivineSmite24III";
@@ -228,4 +231,112 @@ test("an off-list grant is untouched either way", () => {
     usable: new Set([LONGSTRIDER]),
   });
   assert.deepEqual(plan, { dualPool: [], hide: [] });
+});
+
+/* ---------- off-list free-cast grants become real dual-pool rows ---------- */
+// Nigel's Healing Word (Magic Initiate), Victus's Shield, Nahuel's Faerie Fire:
+// an off-class-list grant with a limited free cast. Until now these kept the
+// cached-row shape and sat in "Additional Spells"; a cached row can never reach
+// its level section, so the row has to become real and carry the pool itself.
+
+test("a levelled grant with limited uses is stamped for the dual-pool shape", () => {
+  const spell = { definition: { level: 1, name: "Healing Word" }, limitedUse: { maxUses: 1 } };
+  assert.deepEqual(freeCastGrantStamp(spell, "Magic Initiate (Cleric)"),
+    { uses: "1", feature: "Magic Initiate (Cleric)" });
+});
+
+test("a cantrip is not stamped — it is at will and needs no pool", () => {
+  const spell = { definition: { level: 0, name: "Guidance" }, limitedUse: { maxUses: 1 } };
+  assert.equal(freeCastGrantStamp(spell, "Magic Initiate (Cleric)"), null);
+});
+
+test("a levelled grant with NO free use is not stamped", () => {
+  // Victus's Divine Smite: always-prepared, but it spends slots, not a pool
+  const spell = { definition: { level: 1, name: "Divine Smite" }, limitedUse: null };
+  assert.equal(freeCastGrantStamp(spell, "Paladin's Smite"), null);
+});
+
+test("a pool larger than one is carried through", () => {
+  const spell = { definition: { level: 2, name: "Misty Step" }, limitedUse: { maxUses: 3 } };
+  assert.equal(freeCastGrantStamp(spell, "Fey Touched").uses, "3");
+});
+
+test("a missing maxUses falls back to one rather than an empty pool", () => {
+  const spell = { definition: { level: 1, name: "Bless" }, limitedUse: { maxUses: 0 } };
+  assert.equal(freeCastGrantStamp(spell, "Feat").uses, "1");
+});
+
+test("no feature name means no stamp — the runtime pass matches on it", () => {
+  const spell = { definition: { level: 1, name: "Bless" }, limitedUse: { maxUses: 1 } };
+  assert.equal(freeCastGrantStamp(spell, ""), null);
+  assert.equal(freeCastGrantStamp(spell, null), null);
+});
+
+/* ---------- off-list reconciliation ---------- */
+
+const FAERIE_FIRE = "Compendium.world.ddb-spells.Item.FaerieFire24III";
+
+test("an off-list free-cast grant with a real row is dual-pooled", () => {
+  const plan = planOffListGrantReconciliation({
+    activities: [{ id: "a1", uuid: HEALING_WORD, consumesItemUses: true }],
+    onClassList: new Set(),
+    grantedRowUuids: new Set([HEALING_WORD]),
+  });
+  assert.deepEqual(plan.dualPool, [{ id: "a1", uuid: HEALING_WORD }]);
+});
+
+test("⚠️ without a real row the Cast activity is LEFT ALONE", () => {
+  // Deleting it here would take the cached row with it and remove the spell from
+  // the sheet entirely — the case that must never collapse.
+  const plan = planOffListGrantReconciliation({
+    activities: [{ id: "a1", uuid: HEALING_WORD, consumesItemUses: true }],
+    onClassList: new Set(),
+    grantedRowUuids: new Set(),
+  });
+  assert.deepEqual(plan.dualPool, []);
+});
+
+test("a class-list spell is left to the class-list planner", () => {
+  const plan = planOffListGrantReconciliation({
+    activities: [{ id: "a1", uuid: HEALING_WORD, consumesItemUses: true }],
+    onClassList: new Set([HEALING_WORD]),
+    grantedRowUuids: new Set([HEALING_WORD]),
+  });
+  assert.deepEqual(plan.dualPool, []);
+});
+
+test("a grant with no free cast keeps its shape", () => {
+  // Victus's Divine Smite: always-prepared, spends slots, no pool to move
+  const plan = planOffListGrantReconciliation({
+    activities: [{ id: "a1", uuid: DIVINE_SMITE, consumesItemUses: false }],
+    onClassList: new Set(),
+    grantedRowUuids: new Set([DIVINE_SMITE]),
+  });
+  assert.deepEqual(plan.dualPool, []);
+});
+
+test("handles several grants on one feature independently", () => {
+  const plan = planOffListGrantReconciliation({
+    activities: [
+      { id: "a1", uuid: HEALING_WORD, consumesItemUses: true },
+      { id: "a2", uuid: FAERIE_FIRE, consumesItemUses: true },
+    ],
+    onClassList: new Set(),
+    grantedRowUuids: new Set([HEALING_WORD]),
+  });
+  assert.deepEqual(plan.dualPool, [{ id: "a1", uuid: HEALING_WORD }], "only the one with a row");
+});
+
+test("a dual-pool grant is parsed as the slot-castable variant, not an innate one", () => {
+  const spell = { definition: { level: 1, name: "Healing Word" }, limitedUse: { maxUses: 1 }, usesSpellSlot: false };
+  const reshaped = asDualPoolRowSpell(spell);
+  assert.equal(reshaped.limitedUse, null, "limitedUse drives the innate shape");
+  assert.equal(reshaped.usesSpellSlot, true);
+  assert.equal(reshaped.alwaysPrepared, true);
+});
+
+test("reshaping does not mutate the original — canCast still needs its limitedUse", () => {
+  const spell = { definition: { level: 1, name: "Healing Word" }, limitedUse: { maxUses: 1 } };
+  asDualPoolRowSpell(spell);
+  assert.deepEqual(spell.limitedUse, { maxUses: 1 });
 });

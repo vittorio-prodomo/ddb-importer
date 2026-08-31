@@ -16,7 +16,7 @@ import DDBFeature from "./DDBFeature";
 import DDBChoiceFeature from "./DDBChoiceFeature";
 import { DDBDataUtils, SystemHelpers } from "../lib/_module";
 import AdvancementHelper from "../advancements/AdvancementHelper";
-import { matchesGrantingFeature, planClassListGrantReconciliation, spellSourceUuids, usableSpellSourceUuids } from "../spells/grantedSpellRows";
+import { matchesGrantingFeature, planClassListGrantReconciliation, planOffListGrantReconciliation, spellSourceUuids, usableSpellSourceUuids } from "../spells/grantedSpellRows";
 import DDBCharacter from "../DDBCharacter";
 
 interface ISpellsGranted {
@@ -1358,10 +1358,29 @@ export default class CharacterFeatureFactory {
    * its cached row, which is its only spellbook presence.
    */
   _reconcileClassListGrants() {
-    const classSpells = this.ddbCharacter._spellParser?._generated?.class ?? [];
+    const generated = (this.ddbCharacter._spellParser?._generated ?? {}) as Partial<Record<"class" | "feat" | "race" | "background" | "other", any[]>>;
+    const classSpells = generated.class ?? [];
     const onClassList = spellSourceUuids(classSpells);
-    if (onClassList.size === 0) return;
     const usable = usableSpellSourceUuids(classSpells);
+
+    // Rows the feat/race paths produced for grants the class list does NOT carry
+    // (Magic Initiate's levelled pick, a lineage's levelled spell). These exist
+    // only because the parser gates now let a free-cast grant through; where one
+    // is present the feature's Cast activity is redundant and must go, so no
+    // cached row is ever born and the spell sits at its own level.
+    // ⚠️ Granted rows land in `_granted`, NOT `_generated` — the buckets have the
+    // same keys, which makes the wrong one look right. Reading only `_generated`
+    // found an empty list and silently stamped nothing, leaving the Cast activity
+    // and its cached row in place (measured: featRows 0 vs _granted.feat 3).
+    const granted = ((this.ddbCharacter._spellParser as any)?._granted ?? {}) as
+      Partial<Record<"class" | "feat" | "race" | "background", any[]>>;
+    const offListRows = [
+      ...(generated.feat ?? []), ...(generated.race ?? []), ...(generated.background ?? []),
+      ...(granted.feat ?? []), ...(granted.race ?? []), ...(granted.background ?? []),
+    ];
+    const offListRowUuids = spellSourceUuids(offListRows);
+
+    if (onClassList.size === 0 && offListRowUuids.size === 0) return;
 
     for (const feature of this.processed.features) {
       // During the parse `system.activities` is still a plain object keyed by id —
@@ -1378,6 +1397,9 @@ export default class CharacterFeatureFactory {
       if (castActivities.length === 0) continue;
 
       const { dualPool, hide } = planClassListGrantReconciliation({ activities: castActivities, onClassList, usable });
+      const { dualPool: offListDualPool } = planOffListGrantReconciliation({
+        activities: castActivities, onClassList, grantedRowUuids: offListRowUuids,
+      });
 
       // Free-cast grants of a spell the class list also carries: the class row
       // becomes THE row — always prepared, its own pool, a forward activity (the
@@ -1396,9 +1418,24 @@ export default class CharacterFeatureFactory {
         logger.debug(`Dual-pooling ${activity?.name ?? uuid} onto the class row; Cast activity removed from ${feature.name}.`);
       }
 
+      // Same treatment for an off-list grant, except the row it stamps came from
+      // the feat/race parse rather than the class list.
+      for (const { id, uuid } of offListDualPool) {
+        const grantedRow = offListRows.find((s: any) => s?._stats?.compendiumSource === uuid);
+        if (!grantedRow) continue;
+        const activity = activities[id];
+        foundry.utils.setProperty(grantedRow, "flags.ddbimporter.dualPoolGrant", {
+          uses: `${foundry.utils.getProperty(feature, "system.uses.max") || "1"}`,
+          feature: foundry.utils.getProperty(feature, "flags.ddbimporter.originalName") ?? feature.name,
+        });
+        foundry.utils.setProperty(grantedRow, "system.prepared", 2);
+        delete activities[id];
+        logger.debug(`Dual-pooling off-list grant ${activity?.name ?? uuid}; Cast activity removed from ${feature.name}.`);
+      }
+
       // The pool moves with the last free cast: once nothing left on the feature
       // spends its uses, the (now orphaned) pool goes too.
-      if (dualPool.length > 0) {
+      if (dualPool.length > 0 || offListDualPool.length > 0) {
         const remainingConsumers = Object.values(activities)
           .some((a: any) => (a.consumption?.targets ?? []).some((t: any) => t.type === "itemUses"));
         if (!remainingConsumers && foundry.utils.getProperty(feature, "system.uses.max")) {

@@ -6,6 +6,7 @@ import { utils, logger, CompendiumHelper } from "../../lib/_module";
 import { getSpellCastingAbility, hasSpellCastingAbility, convertSpellCastingAbilityId } from "./ability";
 import DDBSpell from "./DDBSpell";
 import { resolveRaceGrantingTrait, isCastActivityRacialTrait } from "./raceSpellLookup";
+import { asDualPoolRowSpell, freeCastGrantStamp } from "./grantedSpellRows";
 import { DICTIONARY, SETTINGS } from "../../config/_module";
 import { DDBDataUtils, DDBModifiers } from "../lib/_module";
 import DDBCharacter from "../DDBCharacter";
@@ -761,7 +762,16 @@ export default class CharacterSpellFactory {
       // under "Cantrips", since `_prepareSpellbook` pins anything carrying
       // `flags.dnd5e.cachedFor` into the "Additional Spells" section regardless
       // of level. Levelled grants still belong to the enricher.
-      if (spell.definition.level !== 0 && isCastActivityRacialTrait(raceInfo.name)) {
+      // ⚠️ A levelled grant with a FREE CAST is no longer skipped either
+      // (2026-09-01). Same reasoning as the cantrips above, one step further: a
+      // cached row can never leave "Additional Spells", so an off-list grant like
+      // Nahuel's Faerie Fire has to become a real row to sit with its own level.
+      // Its free cast is not lost — `_reconcileClassListGrants` stamps the row for
+      // the dual-pool shape and removes the feature's Cast activity, so the pool
+      // moves onto the spell instead of vanishing with the activity.
+      if (spell.definition.level !== 0
+        && !freeCastGrantStamp(spell, raceInfo.name)
+        && isCastActivityRacialTrait(raceInfo.name)) {
         logger.debug(`Skipping ${spell.definition.name} for ${raceInfo.name}: the Lineage enricher grants it as a Cast activity`);
         continue;
       }
@@ -788,14 +798,22 @@ export default class CharacterSpellFactory {
         },
       };
 
-      if (this.ddb.character.spells.race.filter((sp) =>
+      // ⚠️ A dual-pool grant gets ONE row and builds it itself. Skipping
+      // `handleGrantedSpells` here is load-bearing: it would add the slot-castable
+      // twin on top of the innate row this loop parses, which is two rows for one
+      // spell. Parsing the unlimited variant instead makes that single row the
+      // slot-castable one; the free cast returns as a pool + forward activity.
+      const raceGrantStamp = freeCastGrantStamp(spell, raceInfo.name);
+      if (raceGrantStamp) {
+        flagData.ddbimporter.dndbeyond.usesSpellSlot = true;
+      } else if (this.ddb.character.spells.race.filter((sp) =>
         sp.definition
         && sp.definition.name === spell.definition.name).length === 1
       ) {
         await this.handleGrantedSpells(spell, "race", flagData);
       }
       if (!this.canCast(spell)) continue;
-      const parsedSpell = await DDBSpell.parseSpell(spell, this.character, {
+      const parsedSpell = await DDBSpell.parseSpell(raceGrantStamp ? asDualPoolRowSpell(spell) : spell, this.character, {
         ddbData: this.ddb,
         namePostfix: `${this._getSpellCount(spell.definition.name)}`,
         generateSummons: this.generateSummons,
@@ -833,7 +851,13 @@ export default class CharacterSpellFactory {
       // Cantrips bypass the ignore list for the same reason as the lineage path
       // above: their Cast activity is gone, so this is the only way they reach
       // the sheet — and as a real row they sort under "Cantrips".
-      if (featName && spell.definition.level !== 0 && DICTIONARY.parsing.ignoreSpellsGrantedByFeats.includes(featName)) {
+      // ⚠️ A levelled grant with a FREE CAST bypasses the ignore list too — see the
+      // lineage path above. Magic Initiate's levelled pick (Nigel's Healing Word,
+      // Victus's Shield) becomes a real row and carries its own pool.
+      if (featName
+        && spell.definition.level !== 0
+        && !freeCastGrantStamp(spell, featName)
+        && DICTIONARY.parsing.ignoreSpellsGrantedByFeats.includes(featName)) {
         logger.debug(`Skipping ${spell.definition.name} for ${featInfo.name} as included in feature ignore list`, {
           featName,
           featInfo,
@@ -862,7 +886,11 @@ export default class CharacterSpellFactory {
         },
       };
 
-      if (this.ddb.character.spells.feat.filter((sp) =>
+      // See the lineage path: a dual-pool grant gets exactly one, slot-castable row.
+      const featGrantStamp = freeCastGrantStamp(spell, featName);
+      if (featGrantStamp) {
+        flagData.ddbimporter.dndbeyond.usesSpellSlot = true;
+      } else if (this.ddb.character.spells.feat.filter((sp) =>
         sp.definition
         && sp.definition.name === spell.definition.name).length === 1
       ) {
@@ -874,7 +902,7 @@ export default class CharacterSpellFactory {
         }
       }
       if (!this.canCast(spell)) continue;
-      const parsedSpell = await DDBSpell.parseSpell(spell, this.character, {
+      const parsedSpell = await DDBSpell.parseSpell(featGrantStamp ? asDualPoolRowSpell(spell) : spell, this.character, {
         ddbData: this.ddb,
         namePostfix: `${this._getSpellCount(spell.definition.name)}`,
         generateSummons: this.generateSummons,
