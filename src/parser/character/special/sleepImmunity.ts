@@ -50,9 +50,16 @@ export function declaresSleepImmunity(feature: FeatureLike | null | undefined): 
  */
 export function sleepImmunityEffect(featureName: string, img?: string): Record<string, unknown> {
   return {
-    name: `${featureName}: Magic Can't Put You to Sleep`,
+    // ⚠️ Named for the FEATURE, nothing more. Every other effect on these sheets
+    // does the same ("Fey Ancestry", "Elven: Drow Lineage"), and VAE renders the
+    // name as its label — a sentence-long name is a sentence-long icon caption.
+    // What it does belongs in the description, which VAE shows on hover.
+    name: featureName,
     img: img ?? "icons/magic/control/sleep-bubble-blue.webp",
     transfer: true,
+    // Rulebook language only, per the standing rule — what the trait says, not
+    // what the automation does.
+    description: "<p>Magic can't put you to sleep.</p>",
     changes: [
       {
         key: "system.traits.ci.custom",

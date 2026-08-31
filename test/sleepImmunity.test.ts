@@ -48,8 +48,18 @@ test("the effect transfers and appends with its own separator", () => {
   assert.equal(e.changes[0].value, ";Sleep");
 });
 
-test("the effect names its granting feature", () => {
-  assert.match((sleepImmunityEffect("Trance") as any).name, /^Trance:/);
+test("the effect is named for its feature and nothing else", () => {
+  // VAE renders the name as the icon's label, and every sibling effect on these
+  // sheets is named for its item ("Fey Ancestry", "Elven: Drow Lineage").
+  assert.equal((sleepImmunityEffect("Trance") as any).name, "Trance");
+  assert.equal((sleepImmunityEffect("Fey Ancestry") as any).name, "Fey Ancestry");
+});
+
+test("what it does lives in the description, in rulebook language", () => {
+  const e = sleepImmunityEffect("Trance") as any;
+  assert.match(e.description, /magic can't put you to sleep/i);
+  // No Foundry-mechanics explainer in player-facing text.
+  assert.doesNotMatch(e.description, /immunit|traits|effect|active/i);
 });
 
 test("idempotence: an already-stamped feature is recognised", () => {
