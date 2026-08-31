@@ -5,6 +5,7 @@ import {
   choiceAddendumHtml,
   resolveChoicesByComponent,
   compendiumLookupNames,
+  skillReference,
 } from "../src/parser/character/special/grantedChoices.ts";
 
 /* ---------- the suppression rule ---------- */
@@ -217,4 +218,44 @@ test("a name with no parenthetical yields just itself", () => {
 
 test("only a TRAILING parenthetical is stripped", () => {
   assert.deepEqual(compendiumLookupNames("Weapon (Melee) Master"), ["Weapon (Melee) Master"]);
+});
+
+/* ---------- skills link to their rule page ---------- */
+
+test("a skill label becomes a dnd5e Reference enricher", () => {
+  assert.equal(skillReference("Arcana"), "&amp;Reference[arc]{Arcana}");
+  assert.equal(skillReference("Sleight of Hand"), "&amp;Reference[slt]{Sleight of Hand}");
+});
+
+test("matching a skill name is case-insensitive but exact otherwise", () => {
+  assert.equal(skillReference("arcana"), "&amp;Reference[arc]{arcana}");
+  assert.equal(skillReference("Arcana Lore"), null);
+  assert.equal(skillReference("Navigator's Tools"), null, "a tool is not a skill");
+  assert.equal(skillReference("Intelligence"), null, "an ability is not a skill");
+});
+
+test("the addendum renders a skill as a reference, not plain text", () => {
+  const html = choiceAddendumHtml([{ groupLabel: "Skill Expertise", label: "Arcana", poolId: "p" }]);
+  assert.match(html!, /&amp;Reference\[arc\]\{Arcana\}/);
+});
+
+test("a compendium uuid still wins over a skill reference", () => {
+  const html = choiceAddendumHtml([{
+    groupLabel: "Spell", label: "Arcana", poolId: null, uuid: "Compendium.p.Item.a",
+  }]);
+  assert.match(html!, /@UUID/);
+  assert.doesNotMatch(html!, /Reference\[/);
+});
+
+/* ---------- the group label reads "<label> chosen:" ---------- */
+
+test("the group label says what was chosen", () => {
+  const html = choiceAddendumHtml([{ groupLabel: "Skill Expertise", label: "Arcana", poolId: "p" }]);
+  assert.match(html!, /Skill Expertise chosen:/);
+});
+
+test("an unlabelled choice stays a bare Chosen, never 'Chosen chosen'", () => {
+  const html = choiceAddendumHtml([{ groupLabel: null, label: "Intelligence", poolId: "p" }]);
+  assert.match(html!, /<em>Chosen:/);
+  assert.doesNotMatch(html!, /Chosen chosen/i);
 });

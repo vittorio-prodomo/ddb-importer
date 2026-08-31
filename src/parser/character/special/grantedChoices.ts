@@ -113,6 +113,36 @@ export function resolveChoicesByComponent(ddb: any): Map<number, ResolvedChoice[
   return byComponent;
 }
 
+
+/**
+ * dnd5e's skill keys, against the ENGLISH names DDB uses.
+ *
+ * ⚠️ Deliberately a constant rather than `CONFIG.DND5E.skills`: that config is
+ * LOCALIZED, so on a non-English world its labels would never match the English
+ * label DDB hands us. It also keeps this module Foundry-free and testable.
+ */
+const SKILL_KEYS: Record<string, string> = {
+  "acrobatics": "acr", "animal handling": "ani", "arcana": "arc", "athletics": "ath",
+  "deception": "dec", "history": "his", "insight": "ins", "intimidation": "itm",
+  "investigation": "inv", "medicine": "med", "nature": "nat", "perception": "prc",
+  "performance": "prf", "persuasion": "per", "religion": "rel",
+  "sleight of hand": "slt", "stealth": "ste", "survival": "sur",
+};
+
+/**
+ * A skill label as a dnd5e Reference enricher, linking to its rule page — or null
+ * when the label is not a skill (a tool, an ability score, a spell).
+ *
+ * ⚠️ The ampersand is HTML-ESCAPED to match what DDB already writes in the
+ * surrounding description text. Both forms enrich correctly (verified live
+ * against `TextEditor.enrichHTML`), so this is purely for consistency with the
+ * text it is appended to.
+ */
+export function skillReference(label: string): string | null {
+  const key = SKILL_KEYS[label.trim().toLowerCase()];
+  return key ? `&amp;Reference[${key}]{${label}}` : null;
+}
+
 /**
  * The names to try when looking a chosen entity up in a compendium, best first.
  *
@@ -188,22 +218,31 @@ export function describesExactlyTheseChoices(
  * lines. Rulebook-flavoured and short, per the standing player-facing-text rule —
  * it states what the character has, never what the automation does.
  */
+const UNLABELLED = "Chosen";
+
 export function choiceAddendumHtml(choices: ResolvedChoice[]): string | null {
   if (!choices?.length) return null;
 
   const groups = new Map<string, string[]>();
   for (const choice of choices) {
-    const key = choice.groupLabel ?? "Chosen";
+    const key = choice.groupLabel ?? UNLABELLED;
     const list = groups.get(key) ?? [];
     // A resolved entity links to its compendium entry, keeping the DDB label as
-    // the link text so the sheet still reads "Magic Initiate (Cleric)".
-    const rendered = choice.uuid ? `@UUID[${choice.uuid}]{${choice.label}}` : choice.label;
+    // the link text so the sheet still reads "Magic Initiate (Cleric)". Failing
+    // that, a skill links to its rule page. Anything else stays plain.
+    const rendered = choice.uuid
+      ? `@UUID[${choice.uuid}]{${choice.label}}`
+      : skillReference(choice.label) ?? choice.label;
     if (!list.includes(rendered)) list.push(rendered);
     groups.set(key, list);
   }
 
-  const lines = [...groups.entries()].map(
-    ([group, labels]) => `<p><em>${group}: <strong>${labels.join(", ")}</strong></em></p>`,
-  );
+  // "Skill Expertise chosen: Arcana" — the choice's own label, then what was taken.
+  // ⚠️ The unlabelled fallback is already the word "Chosen", so it must NOT gain a
+  // second one ("Chosen chosen:").
+  const lines = [...groups.entries()].map(([group, labels]) => {
+    const heading = group === UNLABELLED ? UNLABELLED : `${group} chosen`;
+    return `<p><em>${heading}: <strong>${labels.join(", ")}</strong></em></p>`;
+  });
   return lines.join("");
 }
