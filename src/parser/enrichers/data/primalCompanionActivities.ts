@@ -71,8 +71,16 @@ export function buildPrimalCompanionActivities() {
             },
           },
         ],
+        // No level slider: 2024 RAW makes the slot level pure cost (nothing
+        // scales with it), so the module stamps the cheapest available slot at
+        // `dnd5e.preUseActivity` instead of asking. ⚠️ This flag is what draws
+        // the slider — a non-spell item never satisfies dnd5e's
+        // `requiresSpellSlot`, so the usage dialog falls through to its GENERIC
+        // scaling branch and renders a 1–max range input. The consumption
+        // TARGET's own `scaling.mode: "level"` above is a different field and
+        // must stay: it is what lets the module choose the level at all.
         scaling: {
-          allowed: true,
+          allowed: false,
           max: "9",
         },
         spellSlot: true,
