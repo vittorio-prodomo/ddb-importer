@@ -6,6 +6,8 @@ import {
   resolveChoicesByComponent,
   compendiumLookupNames,
   skillReference,
+  pluralizeLabel,
+  isSpellChoice,
 } from "../src/parser/character/special/grantedChoices.ts";
 
 /* ---------- the suppression rule ---------- */
@@ -258,4 +260,53 @@ test("an unlabelled choice stays a bare Chosen, never 'Chosen chosen'", () => {
   const html = choiceAddendumHtml([{ groupLabel: null, label: "Intelligence", poolId: "p" }]);
   assert.match(html!, /<em>Chosen:/);
   assert.doesNotMatch(html!, /Chosen chosen/i);
+});
+
+/* ---------- pluralizing the heading ---------- */
+// Only ever applied when a group holds more than one pick, and only to the LAST
+// word — DDB's labels are noun phrases ("Standard Language", "Wizard Skill
+// Proficiency") whose head noun is final.
+
+test("the everyday cases", () => {
+  assert.equal(pluralizeLabel("Spell"), "Spells");
+  assert.equal(pluralizeLabel("Skill"), "Skills");
+  assert.equal(pluralizeLabel("Standard Language"), "Standard Languages");
+  assert.equal(pluralizeLabel("Wizard Skill Proficiency"), "Wizard Skill Proficiencies");
+});
+
+test("sibilant endings take -es", () => {
+  assert.equal(pluralizeLabel("Bonus"), "Bonuses");
+  assert.equal(pluralizeLabel("Patch"), "Patches");
+});
+
+test("a -y after a vowel is not -ies", () => {
+  assert.equal(pluralizeLabel("Journey"), "Journeys");
+});
+
+test("uncountables are left alone rather than mangled", () => {
+  // "Skill Expertises" is the kind of thing an over-eager rule produces
+  assert.equal(pluralizeLabel("Skill Expertise"), "Skill Expertise");
+});
+
+test("an already-plural label is not doubled", () => {
+  assert.equal(pluralizeLabel("Tools"), "Tools");
+});
+
+test("the heading pluralizes only when there is more than one pick", () => {
+  const one = choiceAddendumHtml([{ groupLabel: "Spell", label: "Shield", poolId: "p" }]);
+  assert.match(one!, /Spell chosen:/);
+  const many = choiceAddendumHtml([
+    { groupLabel: "Spell", label: "Shield", poolId: "p" },
+    { groupLabel: "Spell", label: "Bless", poolId: "p" },
+  ]);
+  assert.match(many!, /Spells chosen:/);
+});
+
+/* ---------- which choices are spells ---------- */
+
+test("recognises a spell choice from its label", () => {
+  assert.equal(isSpellChoice("Spell"), true);
+  assert.equal(isSpellChoice("Cantrip"), true);
+  assert.equal(isSpellChoice("Skill Expertise"), false);
+  assert.equal(isSpellChoice(null), false);
 });

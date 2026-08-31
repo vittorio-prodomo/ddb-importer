@@ -218,6 +218,46 @@ export function describesExactlyTheseChoices(
  * lines. Rulebook-flavoured and short, per the standing player-facing-text rule —
  * it states what the character has, never what the automation does.
  */
+
+/**
+ * Labels that read wrong in the plural, so they are left alone.
+ *
+ * ⚠️ "Skill Expertise" is the motivating case: a naive rule yields "Skill
+ * Expertises". Uncountables are cheaper to list than to detect.
+ */
+const UNCOUNTABLE = new Set(["expertise", "damage", "armor", "armour", "training"]);
+
+/**
+ * Plural of a DDB choice label, applied only when a group holds more than one pick.
+ *
+ * ⚠️ Inherently approximate: these are arbitrary DDB-authored noun phrases, not a
+ * controlled vocabulary. It pluralizes the LAST word — the head noun in every
+ * label observed ("Standard Language", "Wizard Skill Proficiency") — and leaves
+ * anything already plural or uncountable untouched. Prefer adding to
+ * `UNCOUNTABLE` over making the rule cleverer.
+ */
+export function pluralizeLabel(label: string): string {
+  const words = label.trim().split(/\s+/);
+  const head = words.pop();
+  if (!head) return label;
+  const lower = head.toLowerCase();
+
+  if (UNCOUNTABLE.has(lower)) return label;
+  if (/(?:[^s]s|s)$/i.test(head) && /s$/i.test(head) && !/(?:ss|us|is)$/i.test(head)) return label; // already plural
+
+  let plural: string;
+  if (/[^aeiou]y$/i.test(head)) plural = `${head.slice(0, -1)}ies`;
+  else if (/(?:s|x|z|ch|sh)$/i.test(head)) plural = `${head}es`;
+  else plural = `${head}s`;
+
+  return [...words, plural].join(" ");
+}
+
+/** Does this choice hand out spells? Drives which compendium packs are searched first. */
+export function isSpellChoice(groupLabel: string | null | undefined): boolean {
+  return /\b(spell|cantrip)/i.test(groupLabel ?? "");
+}
+
 const UNLABELLED = "Chosen";
 
 export function choiceAddendumHtml(choices: ResolvedChoice[]): string | null {
@@ -241,7 +281,8 @@ export function choiceAddendumHtml(choices: ResolvedChoice[]): string | null {
   // ⚠️ The unlabelled fallback is already the word "Chosen", so it must NOT gain a
   // second one ("Chosen chosen:").
   const lines = [...groups.entries()].map(([group, labels]) => {
-    const heading = group === UNLABELLED ? UNLABELLED : `${group} chosen`;
+    const noun = labels.length > 1 ? pluralizeLabel(group) : group;
+    const heading = group === UNLABELLED ? UNLABELLED : `${noun} chosen`;
     return `<p><em>${heading}: <strong>${labels.join(", ")}</strong></em></p>`;
   });
   return lines.join("");

@@ -4,7 +4,9 @@ import {
   choiceAddendumHtml,
   compendiumLookupNames,
   describesExactlyTheseChoices,
+  isSpellChoice,
   resolveChoicesByComponent,
+  skillReference,
 } from "./grantedChoices";
 
 /**
@@ -19,10 +21,30 @@ const ENTITY_LINK_PACKS = [
   "dnd-players-handbook.feats",
   "dnd-players-handbook.classes",
   "dnd-players-handbook.origins",
-  "dnd-players-handbook.spells",
   "dnd5e.feats24",
   "dnd5e.classes24",
 ];
+
+/**
+ * Searched first for a choice that hands out spells.
+ *
+ * ⚠️ Order matters beyond preference: several spell names collide with other
+ * document types — "Shield" is a spell AND a piece of equipment — so a spell
+ * choice has to meet the spell packs before anything else.
+ */
+const SPELL_LINK_PACKS = [
+  "dnd-players-handbook.spells",
+  "dnd5e.spells24",
+];
+
+/**
+ * Ability scores never have a document to link, and appear as choice options
+ * often enough (Magic Initiate's casting ability, ASI feats) to be worth
+ * skipping rather than indexing packs for.
+ */
+const ABILITY_LABELS = new Set([
+  "strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma",
+]);
 
 /**
  * Compendium uuid for a chosen entity, or null.
@@ -30,8 +52,11 @@ const ENTITY_LINK_PACKS = [
  * Name-based, because that is all the choice gives us: DDB's option id is its own
  * id space and has no bearing on a Foundry compendium's ids.
  */
-async function findEntityUuid(label: string): Promise<string | null> {
-  for (const collection of ENTITY_LINK_PACKS) {
+async function findEntityUuid(label: string, groupLabel: string | null): Promise<string | null> {
+  const packs = isSpellChoice(groupLabel)
+    ? [...SPELL_LINK_PACKS, ...ENTITY_LINK_PACKS]
+    : [...ENTITY_LINK_PACKS, ...SPELL_LINK_PACKS];
+  for (const collection of packs) {
     const pack = game.packs.get(collection);
     if (!pack) continue;
     let index;
@@ -107,12 +132,18 @@ DDBCharacter.prototype._addChoiceAddenda = async function _addChoiceAddenda(this
       continue;
     }
 
-    // Only an ENTITY pick (poolId null — a feat, a spell) can have a compendium
-    // document behind it; a skill or an ability score cannot, and stays plain text.
+    // Anything that names a document gets linked — a feat resolved through the
+    // feats list, and equally a spell picked from a pool (Abjuration Savant's two
+    // free spellbook entries, Magic Initiate's cantrips).
+    //
+    // ⚠️ Skills and ability scores are skipped deliberately: a skill renders as a
+    // Reference enricher to its rule page instead, and an ability has no document
+    // at all — attempting either only risks a false match on a same-named feat.
     for (const choice of choices) {
-      if (choice.poolId === null && choice.uuid === undefined) {
-        choice.uuid = await findEntityUuid(choice.label);
-      }
+      if (choice.uuid !== undefined) continue;
+      if (skillReference(choice.label)) continue;
+      if (ABILITY_LABELS.has(choice.label.trim().toLowerCase())) continue;
+      choice.uuid = await findEntityUuid(choice.label, choice.groupLabel);
     }
 
     const addendum = choiceAddendumHtml(choices);
