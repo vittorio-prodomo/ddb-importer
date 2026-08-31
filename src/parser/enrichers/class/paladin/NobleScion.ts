@@ -56,7 +56,12 @@ export default class NobleScion extends DDBEnricherData {
             condition: "",
           },
           consumptionOverride: {
-            scaling: { allowed: true, max: "5" },
+            // Slot level is pure cost here: the paired `itemUses: -1` restores
+            // exactly ONE use whatever slot is spent, so there is nothing to
+            // choose. `allowed: false` removes the level input; the cheapest
+            // usable slot at or above the target level below is then stamped
+            // generically by `dnd5e-lowest-slot-cast` at `dnd5e.preUseActivity`.
+            scaling: { allowed: false, max: "5" },
             targets: [
               {
                 type: "itemUses",
