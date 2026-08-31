@@ -4,6 +4,7 @@ import {
   describesExactlyTheseChoices,
   choiceAddendumHtml,
   resolveChoicesByComponent,
+  compendiumLookupNames,
 } from "../src/parser/character/special/grantedChoices.ts";
 
 /* ---------- the suppression rule ---------- */
@@ -174,4 +175,46 @@ test("an id in neither pools nor feats is still dropped", () => {
     choiceDefinitions: [],
   } } };
   assert.equal(resolveChoicesByComponent(ddb).has(5), false);
+});
+
+/* ---------- linking a chosen entity to its compendium entry ---------- */
+
+test("a choice carrying a uuid renders as a UUID enricher, keeping the DDB label", () => {
+  const html = choiceAddendumHtml([{
+    groupLabel: "Origin feat", label: "Magic Initiate (Cleric)", poolId: null,
+    uuid: "Compendium.dnd-players-handbook.feats.Item.phbftMagicInitia",
+  }]);
+  assert.match(html!, /@UUID\[Compendium\.dnd-players-handbook\.feats\.Item\.phbftMagicInitia\]\{Magic Initiate \(Cleric\)\}/);
+});
+
+test("a choice with no uuid stays plain text", () => {
+  const html = choiceAddendumHtml([{ groupLabel: "Skill Expertise", label: "Arcana", poolId: "x" }]);
+  assert.doesNotMatch(html!, /@UUID/);
+  assert.match(html!, /Arcana/);
+});
+
+test("mixed picks in one group link only the ones that resolved", () => {
+  const html = choiceAddendumHtml([
+    { groupLabel: "Spell", label: "Shield", poolId: null, uuid: "Compendium.p.Item.a" },
+    { groupLabel: "Spell", label: "Mystery Spell", poolId: null },
+  ]);
+  assert.match(html!, /@UUID\[Compendium\.p\.Item\.a\]\{Shield\}/);
+  assert.match(html!, /Mystery Spell/);
+  assert.equal((html!.match(/@UUID/g) ?? []).length, 1);
+});
+
+/* the name candidates a compendium lookup should try, in order */
+
+test("tries the exact DDB name first, then the parenthetical stripped", () => {
+  // DDB says "Magic Initiate (Cleric)"; the PHB pack only has "Magic Initiate",
+  // because the suffix is DDB's record of the chosen spell list, not a separate feat.
+  assert.deepEqual(compendiumLookupNames("Magic Initiate (Cleric)"), ["Magic Initiate (Cleric)", "Magic Initiate"]);
+});
+
+test("a name with no parenthetical yields just itself", () => {
+  assert.deepEqual(compendiumLookupNames("Lucky"), ["Lucky"]);
+});
+
+test("only a TRAILING parenthetical is stripped", () => {
+  assert.deepEqual(compendiumLookupNames("Weapon (Melee) Master"), ["Weapon (Melee) Master"]);
 });

@@ -39,6 +39,12 @@ export interface ResolvedChoice {
    * itself on the first live run.
    */
   poolId: string | null;
+  /**
+   * Compendium uuid of the chosen ENTITY, when one was found. Only entity picks
+   * (a feat, a spell) have a compendium document to point at; a skill or an
+   * ability score does not, and stays plain text.
+   */
+  uuid?: string | null;
 }
 
 /** "Choose a Skill Expertise" / "Select a Standard Language" → "Skill Expertise". */
@@ -107,6 +113,22 @@ export function resolveChoicesByComponent(ddb: any): Map<number, ResolvedChoice[
   return byComponent;
 }
 
+/**
+ * The names to try when looking a chosen entity up in a compendium, best first.
+ *
+ * ⚠️ DDB suffixes an entity with the sub-choice it carries — "Magic Initiate
+ * (Cleric)" — while the PHB pack holds one "Magic Initiate", because that suffix
+ * records the chosen spell list rather than naming a different feat. So an exact
+ * match is tried first, then the same name with a TRAILING parenthetical removed.
+ * Only trailing: a parenthetical in the middle of a name is part of the name.
+ */
+export function compendiumLookupNames(label: string): string[] {
+  const names = [label];
+  const stripped = label.replace(/\s*\([^()]*\)\s*$/, "").trim();
+  if (stripped && stripped !== label) names.push(stripped);
+  return names;
+}
+
 /** Markup, enricher syntax and entities out; a single spaced line back. */
 function plainText(html: string): string {
   return (html ?? "")
@@ -173,7 +195,10 @@ export function choiceAddendumHtml(choices: ResolvedChoice[]): string | null {
   for (const choice of choices) {
     const key = choice.groupLabel ?? "Chosen";
     const list = groups.get(key) ?? [];
-    if (!list.includes(choice.label)) list.push(choice.label);
+    // A resolved entity links to its compendium entry, keeping the DDB label as
+    // the link text so the sheet still reads "Magic Initiate (Cleric)".
+    const rendered = choice.uuid ? `@UUID[${choice.uuid}]{${choice.label}}` : choice.label;
+    if (!list.includes(rendered)) list.push(rendered);
     groups.set(key, list);
   }
 

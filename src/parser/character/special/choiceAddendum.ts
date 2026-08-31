@@ -2,9 +2,52 @@ import DDBCharacter from "../../DDBCharacter";
 import { logger } from "../../../lib/_module";
 import {
   choiceAddendumHtml,
+  compendiumLookupNames,
   describesExactlyTheseChoices,
   resolveChoicesByComponent,
 } from "./grantedChoices";
+
+/**
+ * Packs consulted when linking a chosen ENTITY, best first.
+ *
+ * ⚠️ The official rulebook modules come before the system's SRD packs on purpose
+ * — Vittorio owns them and they are the fuller text (standing preference, see
+ * [[official-2024-compendiums]]). A pack that is not installed is simply absent
+ * from `game.packs` and skipped.
+ */
+const ENTITY_LINK_PACKS = [
+  "dnd-players-handbook.feats",
+  "dnd-players-handbook.classes",
+  "dnd-players-handbook.origins",
+  "dnd-players-handbook.spells",
+  "dnd5e.feats24",
+  "dnd5e.classes24",
+];
+
+/**
+ * Compendium uuid for a chosen entity, or null.
+ *
+ * Name-based, because that is all the choice gives us: DDB's option id is its own
+ * id space and has no bearing on a Foundry compendium's ids.
+ */
+async function findEntityUuid(label: string): Promise<string | null> {
+  for (const collection of ENTITY_LINK_PACKS) {
+    const pack = game.packs.get(collection);
+    if (!pack) continue;
+    let index;
+    try {
+      index = await pack.getIndex();
+    } catch (error: unknown) {
+      logger.debug(`Could not index ${collection} while linking a chosen entity`, error);
+      continue;
+    }
+    for (const candidate of compendiumLookupNames(label)) {
+      const hit = index.find((entry: any) => entry.name === candidate);
+      if (hit) return hit.uuid ?? `Compendium.${collection}.Item.${hit._id}`;
+    }
+  }
+  return null;
+}
 
 /**
  * Append "what you chose" to the features that offer a choice but never say what
@@ -20,7 +63,7 @@ import {
  * `copyDescription` copies the DDB text ONTO the premade, so an addendum written
  * here survives. Verified live on Scholar, which CPR does adopt.
  */
-DDBCharacter.prototype._addChoiceAddenda = function _addChoiceAddenda(this: DDBCharacter) {
+DDBCharacter.prototype._addChoiceAddenda = async function _addChoiceAddenda(this: DDBCharacter) {
   const ddb = (this as any).source?.ddb;
   if (!ddb) return;
 
@@ -62,6 +105,14 @@ DDBCharacter.prototype._addChoiceAddenda = function _addChoiceAddenda(this: DDBC
     if (describesExactlyTheseChoices(description, labels, pool)) {
       skipped.push(`${feature.name} (already stated)`);
       continue;
+    }
+
+    // Only an ENTITY pick (poolId null — a feat, a spell) can have a compendium
+    // document behind it; a skill or an ability score cannot, and stays plain text.
+    for (const choice of choices) {
+      if (choice.poolId === null && choice.uuid === undefined) {
+        choice.uuid = await findEntityUuid(choice.label);
+      }
     }
 
     const addendum = choiceAddendumHtml(choices);

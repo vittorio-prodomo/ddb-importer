@@ -207,7 +207,7 @@ interface DDBCharacter {
   // special/special.ts
   _addSpecialAdditions(): void;
   // special/choiceAddendum.ts
-  _addChoiceAddenda(): void;
+  _addChoiceAddenda(): Promise<void>;
   // consumptionLinking.ts
   _getAutoLinkActivityDictionarySpellLinkUpdates(): Promise<any>;
   _getAutoLinkActivityDictionaryUpdates(): Promise<any>;
@@ -601,7 +601,7 @@ class DDBCharacter {
       this._addSpecialAdditions();
 
       // states what the player chose on the features that only offer the choice
-      this._addChoiceAddenda();
+      await this._addChoiceAddenda();
 
       this._linkItemsToContainers();
 
