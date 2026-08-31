@@ -44,6 +44,8 @@ export default class DDBFeatEnricher extends DDBEnricherFactoryMixin {
     "Greater Mark of": FeatEnrichers._GreaterMarkOf,
     "Greater Aberrant Mark": FeatEnrichers._GreaterMarkOf,
     "Epic Boon: Choose an Epic Boon feat": FeatEnrichers.EpicBoon,
+    "Archery": GenericEnrichers.Archery,
+    "Fighting Style: Archery": GenericEnrichers.Archery,
     "Fighting Style: Interception": GenericEnrichers.FightingStyleInterception,
     "Interception": GenericEnrichers.FightingStyleInterception,
     "Lucky": GenericEnrichers.Lucky,

@@ -1,3 +1,4 @@
+export { default as Archery } from "./Archery";
 export { default as AuraOf } from "./AuraOf";
 export { default as FightingStyleInterception } from "./FightingStyleInterception";
 export { default as Grapple } from "./Grapple";
