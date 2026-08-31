@@ -43,4 +43,5 @@ import "./character/resources";
 import "./character/inventory";
 import "./character/globalBonuses";
 import "./character/special/special";
+import "./character/special/choiceAddendum";
 import "./character/consumptionLinking";
