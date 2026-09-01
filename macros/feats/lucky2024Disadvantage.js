@@ -41,18 +41,24 @@ const weapon = wf.item?.name ?? null;
 // T212 (2026-09-01): the prompt says WHAT is attacking, and EXPIRES after 30 s
 // with no Luck Point spent (a dismissed dialog spends nothing either).
 const TIMEOUT_MS = 30000;
-const TIMED_OUT = Symbol("timedOut");
-let timer = null, ticker = null;
+// GPS's title-bar countdown (game.gps.attachCountdownChrome, our fork) when present;
+// otherwise a text countdown. Either way the dialog closes itself on expiry, and a
+// self-close reads as "no" (nothing spent) while a real X/Escape reads as "no" too.
+const gpsChrome = typeof game.gps?.attachCountdownChrome === "function";
+let dispose = null;
 const why = weapon
   ? `<p><b>${esc(attacker)}</b> is attacking you with <b>${esc(weapon)}</b>.</p>`
   : `<p><b>${esc(attacker)}</b> is attacking you.</p>`;
+const timeoutLine = gpsChrome
+  ? `<p class="hint">If the time in the title bar runs out, no Luck Point is spent.</p>`
+  : `<p class="hint">No answer within <span class="lucky-countdown">${Math.round(TIMEOUT_MS / 1000)}</span> s: no Luck Point is spent.</p>`;
 const result = await foundry.applications.api.DialogV2.wait({
   window: { title: "Lucky" },
   content:
     why +
     `<p><b>${esc(me.name)}</b>: spend 1 Luck Point to impose <b>Disadvantage</b> on ` +
     `${esc(attacker)}'s attack roll?</p><p><i>${remaining} Luck Point(s) remaining.</i></p>` +
-    `<p class="hint">No answer within <span class="lucky-countdown">${Math.round(TIMEOUT_MS / 1000)}</span> s: no Luck Point is spent.</p>`,
+    timeoutLine,
   buttons: [
     { action: "yes", icon: "fa-solid fa-clover", label: "Spend a Luck Point — Disadvantage" },
     { action: "no", icon: "fa-solid fa-dice-d20", label: "Let them roll normally", default: true },
@@ -60,18 +66,23 @@ const result = await foundry.applications.api.DialogV2.wait({
   modal: true,
   rejectClose: false,
   render: (_event, dialog) => {
+    if (gpsChrome) {
+      game.gps.attachCountdownChrome(dialog, { dialogTitle: "Lucky", initialTimeLeft: Math.round(TIMEOUT_MS / 1000) });
+      dispose = () => game.gps.detachCountdownChrome?.(dialog);
+      return;
+    }
     const started = Date.now();
     const span = dialog.element?.querySelector?.(".lucky-countdown");
-    ticker = setInterval(() => {
+    const ticker = setInterval(() => {
       const left = Math.max(0, Math.ceil((TIMEOUT_MS - (Date.now() - started)) / 1000));
       if (span) span.textContent = String(left);
     }, 1000);
-    timer = setTimeout(() => { dialog[TIMED_OUT] = true; dialog.close(); }, TIMEOUT_MS);
+    const timer = setTimeout(() => dialog.close(), TIMEOUT_MS);
+    dispose = () => { clearInterval(ticker); clearTimeout(timer); };
   },
-  close: (_event, dialog) => (dialog[TIMED_OUT] ? "no" : null),
+  close: () => { dispose?.(); dispose = null; return "no"; },
 });
-if (timer) clearTimeout(timer);
-if (ticker) clearInterval(ticker);
+dispose?.();
 const ok = result === "yes";
 if (!ok) return;
 
