@@ -69,26 +69,20 @@ export default class Lucky extends DDBEnricherData {
 
     return [
       {
+        // FORK PATCH (queue T212, 2026-09-01): the Advantage half is IMPLEMENTED by the
+        // owned module `dnd5e-declared-advantage` (a pre-roll prompt on dnd5e's own
+        // roll-configuration seam, keyed on `system.identifier === "lucky"` + a 2024
+        // signal). The old midi optional-flag `reroll-kh` changes were an informed
+        // reroll — the 2014 feat's timing, anti-RAW for 2024 ("When you roll a d20 for
+        // a D20 Test, you can spend 1 Luck Point to give yourself Advantage on the
+        // roll"). This effect now carries no changes: it exists for the hover text.
         name: "Lucky: Advantage",
-        midiOnly: true,
         options: {
           transfer: true,
           // FORK PATCH (queue T156): each half carries its own concise hover text —
           // without a description VAE falls back to the feat's full text on BOTH buffs.
-          description: "<p>Spend a Luck Point when you roll a d20 — an attack roll, ability check, or saving throw — to reroll the die and keep the higher result.</p>",
+          description: "<p>When you roll a d20 for a D20 Test, you can spend 1 Luck Point to give yourself Advantage on the roll.</p>",
         },
-        midiOptionalChanges: [
-          {
-            name: "Lucky",
-            data: {
-              label: "Lucky",
-              count: "ItemUses.Lucky",
-              "attack.all": "reroll-kh",
-              "check.all": "reroll-kh",
-              "save.all": "reroll-kh",
-            },
-          },
-        ],
       },
       {
         // Bare "ItemMacro" (no document passed): midi rewrites it to this feat's
