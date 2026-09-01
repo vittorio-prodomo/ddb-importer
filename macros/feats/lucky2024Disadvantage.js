@@ -50,7 +50,7 @@ const why = weapon
   ? `<p><b>${esc(attacker)}</b> is attacking you with <b>${esc(weapon)}</b>.</p>`
   : `<p><b>${esc(attacker)}</b> is attacking you.</p>`;
 const timeoutLine = gpsChrome
-  ? `<p class="hint">If the time in the title bar runs out, no Luck Point is spent.</p>`
+  ? ``
   : `<p class="hint">No answer within <span class="lucky-countdown">${Math.round(TIMEOUT_MS / 1000)}</span> s: no Luck Point is spent.</p>`;
 const result = await foundry.applications.api.DialogV2.wait({
   window: { title: "Lucky" },
