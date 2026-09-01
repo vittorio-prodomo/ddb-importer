@@ -5,8 +5,10 @@ import {
   compendiumLookupNames,
   describesExactlyTheseChoices,
   isSpellChoice,
+  linkifyOriginFeat,
   resolveChoicesByComponent,
   skillReference,
+  stripDanglingFeatHeader,
 } from "./grantedChoices";
 
 /**
@@ -88,6 +90,41 @@ async function findEntityUuid(label: string, groupLabel: string | null): Promise
  * `copyDescription` copies the DDB text ONTO the premade, so an addendum written
  * here survives. Verified live on Scholar, which CPR does adopt.
  */
+
+/**
+ * T215, Foundry side — the background's "Feat: <name>" summary line becomes a
+ * link to the origin feat's compendium entry (same pack order as the choice
+ * addenda, official rulebooks first), and any dangling trailing header is
+ * stripped for good measure (`generateBackground` no longer emits one, but the
+ * transform is cheap and keeps this method correct on its own).
+ *
+ * Only the 2024 shape qualifies: `featureName` set, `featureDescription` empty.
+ * A 2014 background's feature text and a homebrew's custom text stay untouched.
+ */
+DDBCharacter.prototype._linkBackgroundOriginFeat = async function _linkBackgroundOriginFeat(this: DDBCharacter) {
+  const background = (this as any).source?.ddb?.character?.background;
+  const definition = background?.hasCustomBackground === true
+    ? background?.customBackground
+    : background?.definition ?? background?.customBackground;
+  const featName = (definition?.featureName ?? "").trim();
+  const featureDescription = (definition?.featureDescription ?? "").trim();
+  if (!featName || featureDescription !== "") return;
+
+  const feature = (this.data.features as any[]).find((f) =>
+    foundry.utils.getProperty(f, "flags.ddbimporter.type") === "background");
+  if (!feature?.system?.description) return;
+
+  let description = feature.system.description.value ?? "";
+  description = stripDanglingFeatHeader(description, featName);
+  const uuid = await findEntityUuid(featName, "Feat");
+  if (uuid) {
+    description = linkifyOriginFeat(description, featName, uuid);
+  } else {
+    logger.debug(`No compendium entry found while linking origin feat "${featName}" on ${feature.name}`);
+  }
+  feature.system.description.value = description;
+};
+
 DDBCharacter.prototype._addChoiceAddenda = async function _addChoiceAddenda(this: DDBCharacter) {
   const ddb = (this as any).source?.ddb;
   if (!ddb) return;

@@ -208,6 +208,7 @@ interface DDBCharacter {
   _addSpecialAdditions(): void;
   // special/choiceAddendum.ts
   _addChoiceAddenda(): Promise<void>;
+  _linkBackgroundOriginFeat(): Promise<void>;
   // consumptionLinking.ts
   _getAutoLinkActivityDictionarySpellLinkUpdates(): Promise<any>;
   _getAutoLinkActivityDictionaryUpdates(): Promise<any>;
@@ -602,6 +603,9 @@ class DDBCharacter {
 
       // states what the player chose on the features that only offer the choice
       await this._addChoiceAddenda();
+
+      // links the background's origin feat and drops its dangling header (T215)
+      await this._linkBackgroundOriginFeat();
 
       this._linkItemsToContainers();
 

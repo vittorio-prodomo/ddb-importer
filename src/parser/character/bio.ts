@@ -131,9 +131,14 @@ export function generateBackground(bg) {
     }
   }
 
-  if (bg.featureName) {
+  // T215: a 2024 background names its ORIGIN FEAT here with an empty
+  // featureDescription (the feat is its own item) — emitting the header then
+  // left a dangling <h2> at the end of every 2024 background. Only a feature
+  // with an actual body (the 2014 shape) earns its header.
+  const backgroundFeatureDescription = (bg.featureDescription ?? "").replace("\r\n", "");
+  if (bg.featureName && backgroundFeatureDescription.trim() !== "") {
     result.description += `<h2>${bg.featureName}</h2>`;
-    result.description += bg.featureDescription.replace("\r\n", "");
+    result.description += backgroundFeatureDescription;
   }
 
   // update definition

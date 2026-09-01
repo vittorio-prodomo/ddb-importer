@@ -310,6 +310,37 @@ function fallbackGroupLabel(label: string): string {
 }
 
 
+const escapeRegExp = (raw: string): string => raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * T215 — a 2024 background's DDB data names its origin feat in `featureName` but
+ * leaves `featureDescription` empty (the feat is a separate item), so the
+ * imported description used to END in a header-sized feat name with nothing
+ * under it. Remove that trailer: the `<h2>` (and DDB's empty `<p></p>` spacer
+ * before it) when nothing but whitespace / closing wrappers follows. A 2014
+ * background's feature header has a real body after it and is left alone.
+ */
+export function stripDanglingFeatHeader(descriptionHtml: string, featName: string): string {
+  if (!descriptionHtml || !featName) return descriptionHtml;
+  const trailer = new RegExp(
+    `(?:<p>\\s*</p>\\s*)?<h2>\\s*${escapeRegExp(featName)}\\s*</h2>(\\s*(?:</div>\\s*)*)$`,
+  );
+  return descriptionHtml.replace(trailer, "$1");
+}
+
+/**
+ * T215, the useful half — the background's "Feat: <name>" summary line becomes a
+ * link to the feat's compendium entry, DDB's label kept as the link text.
+ * First occurrence only, and idempotent by construction: once linked, the name
+ * no longer follows the label directly (an `@UUID[…]` does), so the pattern
+ * cannot match again.
+ */
+export function linkifyOriginFeat(descriptionHtml: string, featName: string, uuid: string): string {
+  if (!descriptionHtml || !featName || !uuid) return descriptionHtml;
+  const summaryLine = new RegExp(`(<strong>\\s*Feat:\\s*</strong>\\s*)(${escapeRegExp(featName)})`);
+  return descriptionHtml.replace(summaryLine, `$1@UUID[${uuid}]{$2}`);
+}
+
 export function choiceAddendumHtml(choices: ResolvedChoice[]): string | null {
   if (!choices?.length) return null;
 
