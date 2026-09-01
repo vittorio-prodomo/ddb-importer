@@ -13,6 +13,11 @@ export default class Lucky extends DDBEnricherData {
       name: "Spend Luck Point",
       activationType: "special",
       addItemConsume: true,
+      // FORK PATCH (queue T212, 2026-09-01): self-targeted — the imported "1 creature"
+      // target made Argon open its target picker on click; the owned module
+      // dnd5e-declared-advantage asks WHICH benefit in its own dialog instead.
+      targetType: "self",
+      rangeSelf: true,
     };
   }
 

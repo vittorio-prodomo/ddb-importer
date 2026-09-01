@@ -37,14 +37,42 @@ if (wf.disadvantage) return;
 
 const esc = foundry.utils.escapeHTML;
 const attacker = wf.actor?.name ?? "the attacker";
-const ok = await foundry.applications.api.DialogV2.confirm({
+const weapon = wf.item?.name ?? null;
+// T212 (2026-09-01): the prompt says WHAT is attacking, and EXPIRES after 30 s
+// with no Luck Point spent (a dismissed dialog spends nothing either).
+const TIMEOUT_MS = 30000;
+const TIMED_OUT = Symbol("timedOut");
+let timer = null, ticker = null;
+const why = weapon
+  ? `<p><b>${esc(attacker)}</b> is attacking you with <b>${esc(weapon)}</b>.</p>`
+  : `<p><b>${esc(attacker)}</b> is attacking you.</p>`;
+const result = await foundry.applications.api.DialogV2.wait({
   window: { title: "Lucky" },
   content:
+    why +
     `<p><b>${esc(me.name)}</b>: spend 1 Luck Point to impose <b>Disadvantage</b> on ` +
-    `${esc(attacker)}'s attack roll?</p><p><i>${remaining} Luck Point(s) remaining.</i></p>`,
+    `${esc(attacker)}'s attack roll?</p><p><i>${remaining} Luck Point(s) remaining.</i></p>` +
+    `<p class="hint">No answer within <span class="lucky-countdown">${Math.round(TIMEOUT_MS / 1000)}</span> s: no Luck Point is spent.</p>`,
+  buttons: [
+    { action: "yes", icon: "fa-solid fa-clover", label: "Spend a Luck Point — Disadvantage" },
+    { action: "no", icon: "fa-solid fa-dice-d20", label: "Let them roll normally", default: true },
+  ],
   modal: true,
   rejectClose: false,
+  render: (_event, dialog) => {
+    const started = Date.now();
+    const span = dialog.element?.querySelector?.(".lucky-countdown");
+    ticker = setInterval(() => {
+      const left = Math.max(0, Math.ceil((TIMEOUT_MS - (Date.now() - started)) / 1000));
+      if (span) span.textContent = String(left);
+    }, 1000);
+    timer = setTimeout(() => { dialog[TIMED_OUT] = true; dialog.close(); }, TIMEOUT_MS);
+  },
+  close: (_event, dialog) => (dialog[TIMED_OUT] ? "no" : null),
 });
+if (timer) clearTimeout(timer);
+if (ticker) clearInterval(ticker);
+const ok = result === "yes";
 if (!ok) return;
 
 // Impose disadvantage on the pending attack (read by checkAttackAdvantage, post-reset).
