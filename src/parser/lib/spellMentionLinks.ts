@@ -22,10 +22,15 @@ import { normaliseGrantName } from "../spells/grantedSpellRows.ts";
 const NAME = "([\\w\\s'’/-]+?)";
 
 const SPELL_PATTERNS = [
-  // <strong>fireball</strong> spell · <em>Hunter's Mark</em> spell
-  new RegExp(`(?:<(strong|em|i)>)${NAME}(?:</\\1>)(\\s*spell)`, "gi"),
+  // <strong>fireball</strong> spell · <em>Hunter's Mark</em> spell · <em>Dancing Lights</em> cantrip
+  new RegExp(`(?:<(strong|em|i)>)${NAME}(?:</\\1>)(\\s*(?:spell|cantrip))`, "gi"),
   // <strong>cone of cold</strong> (5 charges)
   new RegExp(`(?:<(strong|em|i)>)${NAME}(?:</\\1>)(\\s*\\(\\d* charge)`, "gi"),
+  // A bare emphasised name with no postfix — the lineage/legacy tables list
+  // their spells as <td><em>Faerie Fire</em></td>. Only <em> (DDB's spell-name
+  // convention), and only when the name RESOLVES to a spell: an italic book
+  // title or creature name never links because the resolver returns null.
+  new RegExp(`(?:<(em)>)${NAME}(?:</\\1>)()`, "gi"),
 ];
 
 const ITEM_PATTERNS = [

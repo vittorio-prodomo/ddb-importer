@@ -88,3 +88,45 @@ test("no preference keeps the old first-match behaviour", () => {
 
   assert.equal(findByNormalisedName(both, "Hunter's Mark")?.uuid, "…14III");
 });
+
+// Elven lineage table (Warpey/Nahuel, 2026-09-05): "<em>Dancing Lights</em> cantrip"
+// and bare "<td><em>Faerie Fire</em></td>" cells never linked — only " spell" did.
+const LINEAGE_INDEX = [
+  { name: "Dancing Lights", uuid: "Compendium.world.ddb-spells.Item.DancingLights24I" },
+  { name: "Faerie Fire", uuid: "Compendium.world.ddb-spells.Item.FaerieFire24IIII" },
+  { name: "Pass without Trace", uuid: "Compendium.world.ddb-spells.Item.PassWithoutTr24" },
+];
+const resolveLineage = (name: string) => findByNormalisedName(LINEAGE_INDEX, name)?.uuid ?? null;
+
+test("links an <em> name followed by 'cantrip'", () => {
+  const text = "You also know the <em>Dancing Lights</em> cantrip.";
+  assert.equal(
+    linkCompendiumMentions(text, "spell", resolveLineage),
+    "You also know the @UUID[Compendium.world.ddb-spells.Item.DancingLights24I]{Dancing Lights} cantrip.",
+  );
+});
+
+test("links a bare <em> spell name in a table cell, including a multi-word one", () => {
+  const text = "<td><em>Faerie Fire</em></td><td><em>Pass without Trace</em></td>";
+  assert.equal(
+    linkCompendiumMentions(text, "spell", resolveLineage),
+    "<td>@UUID[Compendium.world.ddb-spells.Item.FaerieFire24IIII]{Faerie Fire}</td><td>@UUID[Compendium.world.ddb-spells.Item.PassWithoutTr24]{Pass without Trace}</td>",
+  );
+});
+
+test("a bare <em> that is not a spell (a book title, a creature) is left exactly as it was", () => {
+  const text = "See the <em>Player’s Handbook</em>. A <em>Darkmantle</em> attacks.";
+  assert.equal(linkCompendiumMentions(text, "spell", resolveLineage), text);
+});
+
+test("a bare <strong> is NOT treated as a spell mention — only <em> carries DDB's convention", () => {
+  const text = "<strong>Faerie Fire</strong>";
+  assert.equal(linkCompendiumMentions(text, "spell", resolveLineage), text);
+});
+
+test("the postfix form is not linked twice when the bare pattern runs after it", () => {
+  const text = "the <em>Faerie Fire</em> spell";
+  const out = linkCompendiumMentions(text, "spell", resolveLineage);
+  assert.equal((out.match(/@UUID/g) ?? []).length, 1);
+  assert.match(out, /\{Faerie Fire\} spell$/);
+});
