@@ -11,6 +11,7 @@ import {
 } from "../lib/_module";
 import { DICTIONARY, SETTINGS } from "../config/_module";
 import DDBCharacter, { IDDBCharacterDataStub } from "../parser/DDBCharacter";
+import { healItemEffectDurations } from "../parser/lib/effectDurations";
 import { DDBDataUtils } from "../parser/lib/_module";
 import { abilityOverrideEffect } from "../effects/abilityOverrides";
 import { planEffectWipe } from "../effects/dependentEffectsPlan";
@@ -427,6 +428,9 @@ ${item.system.description.chat}
   async importCharacterItems(items: TAll5eItemDocuments[], keepIds = false) {
     if (items.length > 0) {
       this.notifier("Adding items to character");
+      // T222: items copied from the official/munched packs may carry a stray `rounds: 1`
+      // beside their seconds (one-round buffs in combat) — heal before they reach the sheet.
+      for (const item of items) healItemEffectDurations(item as any);
 
       const newItems = items.filter((i) => !i._id || i._id === null || i._id === undefined);
       const updateItems = items.filter((i) => i._id && i._id !== null && i._id !== undefined);

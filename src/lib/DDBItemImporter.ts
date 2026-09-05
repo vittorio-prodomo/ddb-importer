@@ -8,6 +8,7 @@ import {
 } from "./_module";
 import { DICTIONARY, SETTINGS } from "../config/_module";
 import { ExternalAutomations } from "../effects/_module";
+import { healItemEffectDurations } from "../parser/lib/effectDurations";
 import { IIconMapEntry } from "./Iconizer";
 
 interface IDDBItemImporterOptions {
@@ -473,6 +474,9 @@ export default class DDBItemImporter {
       : this.documents;
 
     const inputItems = (await this.addCompendiumFolderIds(filterItems)).map((item) => {
+      // T222: an official effect shipped with a stray `rounds: 1` beside its seconds dies after
+      // one round in combat — heal it on the way into the compendium (quirk #37).
+      healItemEffectDurations(item as any);
       if (foundry.utils.hasProperty(item, "system.description.value")) {
         item.system.description.value = `<div class="ddb">
 ${item.system.description.value}
