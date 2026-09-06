@@ -243,11 +243,11 @@ export function pluralizeLabel(label: string): string {
   const lower = head.toLowerCase();
 
   if (UNCOUNTABLE.has(lower)) return label;
-  if (/(?:[^s]s|s)$/i.test(head) && /s$/i.test(head) && !/(?:ss|us|is)$/i.test(head)) return label; // already plural
+  if ((/(?:[^s]s|s)$/i).test(head) && (/s$/i).test(head) && !(/(?:ss|us|is)$/i).test(head)) return label; // already plural
 
   let plural: string;
-  if (/[^aeiou]y$/i.test(head)) plural = `${head.slice(0, -1)}ies`;
-  else if (/(?:s|x|z|ch|sh)$/i.test(head)) plural = `${head}es`;
+  if ((/[^aeiou]y$/i).test(head)) plural = `${head.slice(0, -1)}ies`;
+  else if ((/(?:s|x|z|ch|sh)$/i).test(head)) plural = `${head}es`;
   else plural = `${head}s`;
 
   return [...words, plural].join(" ");
@@ -255,7 +255,7 @@ export function pluralizeLabel(label: string): string {
 
 /** Does this choice hand out spells? Drives which compendium packs are searched first. */
 export function isSpellChoice(groupLabel: string | null | undefined): boolean {
-  return /\b(spell|cantrip)/i.test(groupLabel ?? "");
+  return (/\b(spell|cantrip)/i).test(groupLabel ?? "");
 }
 
 const UNLABELLED = "Chosen";

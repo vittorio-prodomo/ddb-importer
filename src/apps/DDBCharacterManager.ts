@@ -577,7 +577,7 @@ export default class DDBCharacterManager extends DDBAppV2 {
     for (const checkbox of checkboxes) {
       const key = (checkbox as HTMLElement).dataset.section;
       if (!key) continue;
-      // eslint-disable-next-line no-await-in-loop
+       
       await game.settings.set(SETTINGS.MODULE_ID, key, newState);
     }
     await this.render();

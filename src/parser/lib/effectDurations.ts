@@ -33,7 +33,7 @@ export function hasStrayRound(duration: EffectDurationLike | null | undefined, r
  * Heal every effect on a plain item data object (the shape the importer writes).
  * @returns the number of effects changed
  */
-export function healItemEffectDurations(item: { effects?: Array<{ duration?: EffectDurationLike | null; [k: string]: unknown }>; system?: { duration?: { units?: string | null } } } | null | undefined, roundSeconds = ROUND_SECONDS): number {
+export function healItemEffectDurations(item: { effects?: { duration?: EffectDurationLike | null; [k: string]: unknown }[]; system?: { duration?: { units?: string | null } } } | null | undefined, roundSeconds = ROUND_SECONDS): number {
   let changed = 0;
   // A spell whose OWN duration is in rounds/turns (2014 Command: "1 round") carries the
   // truth in `rounds` — there the seconds are the stray, not our business here.

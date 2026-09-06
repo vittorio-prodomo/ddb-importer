@@ -59,12 +59,12 @@ export default class DDBClassFeatureEnricher extends DDBEnricherFactoryMixin {
     });
   }
 
-  NAME_HINTS_2014: Record<string, any> = {
+  NAME_HINTS_2014: Record<string, string> = {
     "Channel Divinity: Sacred Weapon": "Sacred Weapon",
     "Lay on Hands Pool": "Lay On Hands: Healing Pool",
   };
 
-  NAME_HINTS: Record<string, any> = {
+  NAME_HINTS: Record<string, string> = {
     "Convert Sorcery Points": "Font of Magic",
     "Font of Magic: Convert Spell Slots": "Font of Magic",
     "Font Of Magic": "Font of Magic",
@@ -124,6 +124,7 @@ export default class DDBClassFeatureEnricher extends DDBEnricherFactoryMixin {
     "Trail Warden Spells": "Ranger Spells",
     "Vermin Lord Spells": "Ranger Spells",
     "Grim Harbinger Spells": "Ranger Spells",
+    "Hollow Warden Spells": "Ranger Spells",
     "Psionic Spells": "Sorcerer Extra Spells",
     "Clockwork Spells": "Sorcerer Extra Spells",
     "Draconic Spells": "Sorcerer Extra Spells",
@@ -142,11 +143,13 @@ export default class DDBClassFeatureEnricher extends DDBEnricherFactoryMixin {
     "Horned King Spells": "Warlock Extra Spells",
     "Coven Spells": "Warlock Extra Spells",
     "First Vampire Spells": "Warlock Extra Spells",
+    "Undead Spells": "Warlock Extra Spells",
     "Alchemist Spells": "Artificer Spells",
     "Armorer Spells": "Artificer Spells",
     "Artillerist Spells": "Artificer Spells",
     "Battle Smith Spells": "Artificer Spells",
     "Forge Adept Spells": "Artificer Spells",
+    "Reanimator Spells": "Artificer Spells",
     // "Elemental Disciplines: Clench of the North Wind": "Elemental Disciplines",
     // "Elemental Disciplines: Fangs of the Fire Snake": "Elemental Disciplines",
     // "Elemental Disciplines: Fist of Four Thunders": "Elemental Disciplines",
@@ -158,7 +161,7 @@ export default class DDBClassFeatureEnricher extends DDBEnricherFactoryMixin {
     // "Elemental Disciplines: Water Whip": "Elemental Disciplines",
   };
 
-  NAME_HINT_INCLUDES: Record<string, any> = {
+  NAME_HINT_INCLUDES: Record<string, string> = {
     "Metamagic:": "MetamagicGeneric",
     "Enchantments:": "EnchantmentsExtras",
     "Eldritch Invocations: Agonizing Blast": "Eldritch Invocations: Agonizing Blast",
@@ -169,7 +172,10 @@ export default class DDBClassFeatureEnricher extends DDBEnricherFactoryMixin {
     // "Additional Fighting Style:": "Additional Fighting Style Base",
   };
 
-  ENRICHERS: Record<string, any> = {
+  // Mixed map: most keys are flat enricher constructors (looked up by feature hint),
+  // but a few class keys (Paladin/Barbarian/Warlock) nest a per-feature sub-map, consumed
+  // two-deep in _defaultNameLoader as `new this.ENRICHERS[classHintName][this.hintName]`.
+  ENRICHERS: Record<string, EnricherConstructor | Record<string, EnricherConstructor>> = {
     Paladin: {
       "Elemental Strike": ClassEnrichers.Paladin.ElementalSmite,
     },
@@ -404,7 +410,7 @@ export default class DDBClassFeatureEnricher extends DDBEnricherFactoryMixin {
     "Artificer Spells": ClassEnrichers.Artificer.ArtificerSpells,
   };
 
-  FALLBACK_ENRICHERS: Record<string, any> = {
+  FALLBACK_ENRICHERS: Record<string, EnricherConstructor> = {
     Generic: ClassEnrichers.Generic,
   };
 }

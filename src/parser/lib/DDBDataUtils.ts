@@ -106,7 +106,7 @@ export default class DDBDataUtils {
 
     if (foundryItem.system.activities) {
       Object.keys(foundryItem.system.activities).forEach((id) => {
-        const activity: IActivityData = foundryItem.system.activities[id];
+        const activity: I5eActivity = foundryItem.system.activities[id];
 
         if (activity.type === "attack") {
           if (toHitBonus) {
@@ -369,6 +369,10 @@ export default class DDBDataUtils {
     );
 
     return result;
+  }
+
+  static hasSpeciesTrait({ ddbData, traitName } : { ddbData: IDDBData; traitName: string }) {
+    return ddbData.character.race.racialTraits.some((trait) => trait.definition.name === traitName);
   }
 
   static hasSubClass({ ddbData, subClassName } : { ddbData: IDDBData; subClassName: string }) {

@@ -1068,7 +1068,7 @@ Effects can also be created to use Active Auras${MuncherSettings.getInstalledIco
     });
   },
 
-  updateMuncherSettings: async (_html: string, event: Event) => {
+  updateMuncherSettings: async (event: Event) => {
     const target = event.target as HTMLInputElement;
     const selection = target.dataset.section;
     const checked = target.checked;

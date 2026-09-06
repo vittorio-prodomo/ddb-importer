@@ -118,6 +118,8 @@ export const PARSING_FEATURES = {
     "Fighting Style feat",
     "Elemental Attunement: Activate Elemental Attunement",
     "Muscle Mass",
+    "Werewolf Instincts",
+    "Strange Endurance",
   ],
   SKIPPED_FEATURES_STARTS_WITH: [
     "Metamagic Options:",
@@ -161,6 +163,8 @@ export const PARSING_FEATURES = {
     "Bladesong",
     "Brutal Critical",
     "Kensei Weapon",
+    "Umbral Form",
+    "Form of Dread",
   ],
   FORCE_DUPLICATE_OVERWRITE: [
     "Cosmic Omen",
@@ -336,6 +340,9 @@ export const PARSING_CHOICE_FEATURES = {
     "Metamagic",
     "Elemental Attunement",
     "Ghaal'Shaarat",
+    "Reanimated Companion",
+    "Reanimator's Skillset",
+    "Spirits from Beyond",
   ],
   NO_CHOICE_SECRET: [
     "Divine Order",
@@ -369,6 +376,7 @@ export const PARSING_CHOICE_FEATURES = {
     "Totemic Attunement",
     "Variant Tiefling",
     "Genie's Vessel",
+    "Reanimator's Skillset",
   ],
   USE_ALL_CHOICES: [
     // "Primal Companion",
@@ -386,6 +394,7 @@ export const PARSING_CHOICE_FEATURES = {
     // "Arcane Shot Options",
   ],
   NO_CHOICE_DESCRIPTION_ADDITION: [
+    "Reanimator's Skillset",
     "Enchantments",
     "Advanced Enchantments",
     "Aspect of the Wilds",
@@ -486,6 +495,9 @@ export const PARSING_CHOICE_FEATURES = {
     "Draconic Disciple",
     "Genie Kind",
     "Ghaal'Shaarat",
+    "Reanimated Companion",
+    "Reanimator's Skillset",
+    "Spirits from Beyond",
   ],
   OVERRIDE_CHOICE_FEATURE: [
     "Eldritch Invocations",
@@ -535,6 +547,12 @@ export const FEATURE_SPELLS_IGNORE = [
   "Undying Servitude",
   "Visions of Distant Realms",
   "Whispers of the Grave",
+  "Return to Life",
+  "Circle of Mortality",
+  "Voice of Death",
+  "Spirit Query",
+  "Tokens of the Departed",
+  "Beasts of Ill Omen",
 ];
 
 export const IGNORE_SPELLS_GRANTED_BY_CLASS_FEATURES = [
@@ -570,6 +588,14 @@ export const IGNORE_SPELLS_GRANTED_BY_CLASS_FEATURES = [
   "Undying Servitude",
   "Visions of Distant Realms",
   "Whispers of the Grave",
+  "Refined Reanimation",
+  "Circle of Mortality",
+  "Return to Life",
+  "Channeler",
+  "Voice of Death",
+  "Spirit Query",
+  "Tokens of the Departed",
+  "Beasts of Ill Omen",
 ];
 
 export const IGNORE_SPELLS_GRANTED_BY_FEATS = [
@@ -599,4 +625,8 @@ export const NO_GRANTED_SPELL_LIST_FEATURE_2014_INCLUDES = [
   "Shape Shadows",
   "Headwinds",
   "Wards and Seals",
+];
+
+export const FORCE_TRAIT_SPELL_ADVANCEMENT_ON_RACE = [
+
 ];

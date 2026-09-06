@@ -20,8 +20,12 @@
 /** Words that are a back-reference to an already-named spell, never a spell name. */
 const PRONOUNS = new Set(["it", "them", "that", "this", "that spell", "this spell", "the spell", "the spells"]);
 
-/** The sentence that NAMES the spell — authoritative wherever it appears. */
-const ALWAYS_PREPARED = /You always have the (.+?) spell(?:s)? prepared/i;
+/**
+ * The sentence that NAMES the spell — authoritative wherever it appears. The
+ * optional prefix and the plural came in with upstream 7.1.22 ("When you reach
+ * 3rd level, you always have the X and Y spells prepared."), merged for T228.
+ */
+const ALWAYS_PREPARED = /(?:When you reach (\d+)(?:st|nd|rd|th) level, )?You always have the (.+?) (spell|spells) prepared/i;
 
 /** The sentence that describes the free cast; its subject may be a pronoun. */
 const FREE_CAST = /(?:you can |gain the ability to )?cast (?:the )?(.+?) (?:once )?without (?:expending|using) a spell slot/i;
@@ -42,12 +46,38 @@ function clean(name: string | undefined | null): string | null {
  * to one.
  */
 export function parseAlwaysPreparedGrant(description: string): string | null {
+  return parseAlwaysPreparedGrants(description)?.spells[0] ?? null;
+}
+
+export interface AlwaysPreparedGrants {
+  /** The character level the grant arrives at; 1 unless the text says otherwise. */
+  level: number;
+  /** Lowercased spell names, in text order, never empty. */
+  spells: string[];
+}
+
+/**
+ * Every spell the description grants, with the level it arrives at. A plural
+ * naming sentence ("the X and Y spells prepared") lists several; a singular one
+ * is ONE spell even when its name contains "and" (Protection from Evil and Good),
+ * so the split only happens on the plural form.
+ */
+export function parseAlwaysPreparedGrants(description: string): AlwaysPreparedGrants | null {
   if (typeof description !== "string" || description === "") return null;
   // An @UUID[...]{Name} enricher link reads as its label.
   description = description.replace(/@UUID\[[^\]]+\]\{([^}]+)\}/g, "$1");
 
-  const named = clean(description.match(ALWAYS_PREPARED)?.[1]);
-  if (named) return named;
+  const named = description.match(ALWAYS_PREPARED);
+  if (named) {
+    const level = named[1] ? parseInt(named[1]) : 1;
+    const plural = named[3].toLowerCase() === "spells";
+    // Commas, "and", and the Oxford ", and" all separate; the split never sees a
+    // singular grant, so "Protection from Evil and Good" survives.
+    const parts = plural ? named[2].split(/\s*,\s*(?:and\s+)?|\s+and\s+/) : [named[2]];
+    const spells = parts.map(clean).filter((s): s is string => s !== null);
+    if (spells.length) return { level, spells };
+  }
 
-  return clean(description.match(FREE_CAST)?.[1]);
+  const fallback = clean(description.match(FREE_CAST)?.[1]);
+  return fallback ? { level: 1, spells: [fallback] } : null;
 }

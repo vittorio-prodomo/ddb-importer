@@ -13,28 +13,31 @@ DDBCharacter.prototype._getCoreProficiencies = function _getCoreProficiencies(th
 DDBCharacter.prototype._getCoreMasteries = function _getCoreMasteries(this: DDBCharacter, includeItemEffects = false): IDDBPCDnDBeyondWeaponMasteryFlags[] {
   return DDBModifiers
     .filterBaseModifiers(this.source.ddb, "weapon-mastery", { restriction: null, includeExcludedEffects: includeItemEffects })
-    .flatMap((prof) => {
-      const weaponRegex = /(.*) \(([\w-, ]+)\)$/ig;
-      const masteryDetails = weaponRegex.exec(prof.friendlySubtypeName);
-      // ⚠️ FORK PATCH (queue T112). `exec` returns null when the name does not fit
-      // "Mastery (Weapon)", and upstream dereferences it unguarded — so ONE oddly-shaped
-      // weapon-mastery grant throws inside `_generateProficiencies` and aborts the ENTIRE
-      // character parse, with an error naming neither the character nor the offending value.
-      // A mastery we cannot read is worth losing; the whole import is not.
-      if (!masteryDetails) {
-        logger.warn(
-          `Skipping weapon mastery "${prof.friendlySubtypeName}" — it does not match the expected `
-          + `"Mastery (Weapon)" shape, so it cannot be mapped to a dnd5e mastery id.`,
-          { friendlySubtypeName: prof.friendlySubtypeName, modifier: prof },
-        );
-        return [];
+    // Quirk #14 / T112 was fixed here first (a null `exec` on ONE oddly-shaped mastery
+    // aborted the whole character parse); upstream 7.1.21 landed the same guard plus a
+    // try/catch, so the 7.1.x merge (T228) takes upstream's wider version.
+    .map((prof) => {
+      try {
+        const weaponRegex = /(.*) \(([\w-, ]+)\)$/ig;
+        const masteryDetails = weaponRegex.exec(prof.friendlySubtypeName);
+        if (!masteryDetails) {
+          logger.warn("Unable to parse weapon mastery proficiency", {
+            proficiency: prof,
+            friendlySubtypeName: prof.friendlySubtypeName,
+            this: this,
+          });
+          return null;
+        }
+        const dnd5eNameArray = masteryDetails[2].trim().toLowerCase().split(",");
+        const dnd5eName = dnd5eNameArray.length === 2
+          ? `${dnd5eNameArray[1].trim()}${dnd5eNameArray[0].trim()}`.replaceAll(" ", "")
+          : dnd5eNameArray[0].replaceAll(" ", "");
+        return { weapon: masteryDetails[2].trim(), mastery: masteryDetails[1].trim(), dnd5eName };
+      } catch (error) {
+        logger.error(`Error parsing weapon mastery proficiency ${prof.friendlySubtypeName}`, { error, prof, this: this });
+        return null;
       }
-      const dnd5eNameArray = masteryDetails[2].trim().toLowerCase().split(",");
-      const dnd5eName = dnd5eNameArray.length === 2
-        ? `${dnd5eNameArray[1].trim()}${dnd5eNameArray[0].trim()}`.replaceAll(" ", "")
-        : dnd5eNameArray[0].replaceAll(" ", "");
-      return [{ weapon: masteryDetails[2].trim(), mastery: masteryDetails[1].trim(), dnd5eName }];
-    });
+    }).filter((mastery) => mastery !== null) as IDDBPCDnDBeyondWeaponMasteryFlags[];
 };
 
 DDBCharacter.prototype._generateLanguages = function _generateLanguages(this: DDBCharacter) {

@@ -68,8 +68,8 @@ const CompendiumHelper = {
     } else {
       if (fail) {
         logger.error(`Unable to find compendium ${label}`);
-        ui.notifications.error(`Unable to open the Compendium ${label}. Check the compendium exists and is set in "Module Settings > DDB Importer > Compendiums"`);
-        throw new Error(`Unable to open the Compendium ${label}. Check the compendium exists and is set in "Module Settings > DDB Importer > Compendiums".`);
+        ui.notifications.error(`Unable to open the Compendium ${label}. Check the compendium exists and is set in "Module Settings > DDB Importer > Core Settings > Compendiums"`);
+        throw new Error(`Unable to open the Compendium ${label}. Check the compendium exists and is set in "Module Settings > DDB Importer > Core Settings > Compendiums".`);
       } else {
         logger.info(`Unable to find compendium ${label}`);
       }
@@ -86,8 +86,8 @@ const CompendiumHelper = {
     } else {
       if (fail) {
         logger.error(`Unable to find compendium ${compendiumLabel} for ${type} documents`);
-        ui.notifications.error(`Unable to open the Compendium ${compendiumLabel}. Check the compendium exists and is set in "Module Settings > DDB Importer > Compendiums"`);
-        throw new Error(`Unable to open the Compendium ${compendiumLabel}. Check the compendium exists and is set in "Module Settings > DDB Importer > Compendiums"`);
+        ui.notifications.error(`Unable to open the Compendium ${compendiumLabel}. Check the compendium exists and is set in "Module Settings > DDB Importer > Core Settings > Compendiums"`);
+        throw new Error(`Unable to open the Compendium ${compendiumLabel}. Check the compendium exists and is set in "Module Settings > DDB Importer > Core Settings > Compendiums"`);
       } else {
         logger.info(`Unable to open compendium, skipping compendium ${compendiumLabel} for ${type} integration`);
       }
@@ -330,7 +330,15 @@ const CompendiumHelper = {
    * @returns {Promise<Array<object|null>>} A promise that resolves to an array of document entries or complete documents.
    *                                        Returns null for documents that are not found.
    */
-  queryCompendiumEntries: async ({ compendiumName, documentNames, getDocuments = false, matchedProperties = {}, useParenthesisMatch = true } = {}) => {
+  queryCompendiumEntries: async ({
+    compendiumName, documentNames, getDocuments = false, matchedProperties = {}, useParenthesisMatch = true,
+  }: {
+    compendiumName: string;
+    documentNames: string[];
+    getDocuments?: boolean;
+    matchedProperties?: Record<string, any>;
+    useParenthesisMatch?: boolean;
+  }) => {
     // get the compendium
     const compendium = game.packs.get(compendiumName);
     if (!compendium) return null;
@@ -338,8 +346,8 @@ const CompendiumHelper = {
     // retrieve the compendium index
     const matchedPropertiesKeys = Object.keys(matchedProperties);
     const fields = ["name", "flags.ddbimporter.originalName", ...matchedPropertiesKeys];
-    let index = await compendium.getIndex({ fields });
-    index = index.map((entry) => {
+    const rawIndex = await compendium.getIndex({ fields });
+    const index = rawIndex.map((entry) => {
       entry.normalizedName = utils.normalizeString(entry.name);
       entry.originalNormalisedName = utils.normalizeString(entry.flags?.ddbimporter?.originalName ?? entry.name);
       return entry;

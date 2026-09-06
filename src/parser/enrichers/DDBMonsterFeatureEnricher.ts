@@ -3,7 +3,7 @@ import { GenericEnrichers, MonsterEnrichers } from "./_module";
 import { logger, utils } from "../../lib/_module";
 import DDBMonsterFeature from "../monster/features/DDBMonsterFeature";
 
-export default class DDBMonsterFeatureEnricher extends DDBEnricherFactoryMixin {
+export default class DDBMonsterFeatureEnricher extends DDBEnricherFactoryMixin<Record<string, string>> {
   monster: I5eMonsterData;
   monsterName: string;
   monsterHintName: string | null;
@@ -134,12 +134,12 @@ export default class DDBMonsterFeatureEnricher extends DDBEnricherFactoryMixin {
   }
 
   // name includes for monsters only match against the name
-  MONSTER_NAME_HINT_2014_INCLUDES: Record<string, any> = {
+  MONSTER_NAME_HINT_2014_INCLUDES: Record<string, string> = {
     // "Dragon": "Dragon",
   };
 
   // name includes for monsters only match against the name
-  MONSTER_NAME_HINT_INCLUDES: Record<string, any> = {
+  MONSTER_NAME_HINT_INCLUDES: Record<string, string> = {
     // "Dragon": "Dragon",
     "Animated Object (": "Summon Animated Object",
     "Empyrean (": "Empyrean",
@@ -149,15 +149,15 @@ export default class DDBMonsterFeatureEnricher extends DDBEnricherFactoryMixin {
     "Protector": "Eldritch Cannon",
   };
 
-  NAME_HINTS_2014: Record<string, any> = {};
+  NAME_HINTS_2014: Record<string, Record<string, string>> = {};
 
-  NAME_HINTS: Record<string, any> = {
+  NAME_HINTS: Record<string, Record<string, string>> = {
     "Elemental Cultist": {
       "Elemental Absorption (1/Day)": "Elemental Absorption",
     },
   };
 
-  GENERIC_FEATURE_NAME: Record<string, any> = {
+  GENERIC_FEATURE_NAME: Record<string, string> = {
     "Fallible Invisibility": "Invisibility",
     "Invisibility": "Invisibility",
     "Mask of the Wild": "Mask of the Wild",
@@ -170,18 +170,19 @@ export default class DDBMonsterFeatureEnricher extends DDBEnricherFactoryMixin {
     "Superior Invisibility": "Invisibility",
     "Uncanny Dodge": "Uncanny Dodge",
     "Illumination": "Illumination",
+    "Vanish": "Invisibility",
   };
 
-  GENERIC_FEATURE_NAME_STARTS_WITH: Record<string, any> = {
+  GENERIC_FEATURE_NAME_STARTS_WITH: Record<string, string> = {
     "Legendary Resistance": "Legendary Resistance",
     "Pack Tactics": "Pack Tactics",
   };
 
-  GENERIC_FEATURE_NAME_INCLUDES: Record<string, any> = {
+  GENERIC_FEATURE_NAME_INCLUDES: Record<string, string> = {
     "Absorption": "Absorption",
   };
 
-  GENERIC_ENRICHERS: Record<string, any> = {
+  GENERIC_ENRICHERS: Record<string, EnricherConstructor> = {
     "Absorption": MonsterEnrichers.Generic.Absorption,
     "Invisibility": MonsterEnrichers.Generic.Invisibility,
     "Legendary Resistance": MonsterEnrichers.Generic.LegendaryResistance,
@@ -194,7 +195,9 @@ export default class DDBMonsterFeatureEnricher extends DDBEnricherFactoryMixin {
     "Illumination": MonsterEnrichers.Generic.Illumination,
   };
 
-  ENRICHERS: Record<string, any> = {
+  FALLBACK_ENRICHERS: Record<string, EnricherConstructor> = {};
+
+  ENRICHERS: Record<string, Record<string, EnricherConstructor>> = {
     Generic: this.GENERIC_ENRICHERS,
     "Conjured Animals": { "Pack Damage": MonsterEnrichers.ConjuredAnimals.PackDamage },
     "Conjured Air Elemental": { "Air Element": MonsterEnrichers.ConjuredElemental.ElementDamage },

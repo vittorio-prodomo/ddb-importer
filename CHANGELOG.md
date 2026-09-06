@@ -1,5 +1,87 @@
 # Next Up
 
+# 7.1.36
+
+- Invisibility typo.
+
+# 7.1.35
+
+- Monsters with persistent invisibility could hang during parsing with some midi-qol configurations.
+
+# 7.1.34
+
+- When importing adventures that have been enhanced with v14 data, they no longer fail to import. e.g. the new Ravenloft books.
+
+# 7.1.33
+
+- Eerie Token parsing improvements
+- Lupin parsing fixes
+- Reborn parsing fixes
+- Some cast activities on monster generation would not be set as a bonus action, such as Slow on Stone Golem or Divine Aid on the Planetar.
+
+# 7.1.32
+
+- Eldritch Cannon Fixes
+- Indomitable did not parse an activity any more
+- Some monster features such as the Bearded Devil's glaive would generate a template in their activity
+
+# 7.1.31
+
+- Backgrounds now capture equipment during character option munch!
+- Weapon items with spells/uses will no longer generate consumption on attack activities by default.
+- Character feature importer now uses sockets like v7.3.x, this will improve the current spate of disconnections/failures whilst using the option munch. @_auragm
+
+# 7.1.30
+
+- More improvements to background equipment and feat parsing.
+- More icon updates for Ravenloft.
+
+# 7.1.29
+
+- Dark Gift feats now have their own category.
+- Backgrounds now add starting equipment
+- Backgrounds parsed via character options now capture tool and ability score advancements
+
+# 7.1.28
+
+- Zealous Presence granted disadvantage on saving throws - @redarchongaming
+
+# 7.1.27
+
+- Tome of xxx effect adjustments if using DAE.
+- Monster filter for type would not show correctly when re-opening monster muncher.
+
+# 7.1.26
+
+- Some items would never apply effects such as Amulet of Health on imported characters.
+- Ability score bonuses with a "maximum of 20" restriction (e.g. some feats) were counted twice, inflating the ability score by the bonus amount.
+- Spell preparation methods not kept when using override compendium.
+
+# 7.1.25
+
+- Traits for species could add spell activities and advancements, when only advancements were needed. Some advancements were not generated.
+
+# 7.1.24
+
+- Vengeful Blade would break spell imports.
+
+# 7.1.23
+
+- Booming blade would break spell imports.
+
+# 7.1.22
+
+- Improve spell advancement and cast activity generation on species traits. Spell advancements now appear on the feature for species.
+- Fix issues when trying to munch with self hosted proxy.
+- Ravenloft subclass parsing: Rogue, Sorcerer, Warlock.
+- Dhampir 2024 parsing fixes.
+
+# 7.1.21
+
+- Ravenloft subclass parsing: Artificer (Reanimator), Bard (Spirit), Cleric (Grave), Ranger (Hollow Warden) fixes
+- Sometimes monster token images could come in as the default 5e icon, especially if another monsters used an identical image.
+- Weapon Mastery changes on DDB broke some character imports.
+
 # 7.1.20
 
 - Will now import animated frames from DDB when importing frames.

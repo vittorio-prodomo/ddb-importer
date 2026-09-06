@@ -25,6 +25,8 @@ DDBCharacter.prototype._addSpecialAdditions = function _addSpecialAdditions(this
   // in `effects/external/ChrisPremadesHelper.ts` (which re-attaches it now). The
   // outcome per candidate is logged so "no effect appeared" can be told apart
   // from "the feature was never in this list" without another instrumented run.
+  // (Upstream 7.1.33 added the Reborn's "Everlasting" to its actor-level list;
+  // ours carries it in SLEEP_IMMUNITY_FEATURES — 7.1.x merge, T228.)
   const seen: Record<string, string> = {};
 
   for (const feature of checkList) {
@@ -32,7 +34,7 @@ DDBCharacter.prototype._addSpecialAdditions = function _addSpecialAdditions(this
     if (named) {
       const f = feature as any;
       seen[feature.name] = !declaresSleepImmunity(f)
-        ? `skipped: type=${f.type} clause=${/magic can[\u2019']t put you to sleep/i.test(f.system?.description?.value ?? "")} descLen=${(f.system?.description?.value ?? "").length}`
+        ? `skipped: type=${f.type} clause=${(/magic can[\u2019']t put you to sleep/i).test(f.system?.description?.value ?? "")} descLen=${(f.system?.description?.value ?? "").length}`
         : hasSleepImmunityEffect(f)
           ? "skipped: already has the effect"
           : "applied";

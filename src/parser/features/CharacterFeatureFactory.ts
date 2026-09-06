@@ -18,6 +18,7 @@ import { DDBDataUtils, SystemHelpers } from "../lib/_module";
 import AdvancementHelper from "../advancements/AdvancementHelper";
 import { matchesGrantingFeature, planClassListGrantReconciliation, planOffListGrantReconciliation, spellSourceUuids, usableSpellSourceUuids } from "../spells/grantedSpellRows";
 import DDBCharacter from "../DDBCharacter";
+import type DDBSummonsManager from "../companions/DDBSummonsManager";
 
 interface ISpellsGranted {
   feature: string;
@@ -417,19 +418,24 @@ export default class CharacterFeatureFactory {
     await this._generateUnarmedStrikeAction();
     await this._generateOtherActions();
 
-    this.processed.actions = foundry.utils.duplicate(this.parsed.actions);
+    this.processed.actions = foundry.utils.duplicate(this.parsed.actions) as unknown as T5eFeatureMixinDataTypes[];
 
     this.processed.actions.sort().sort((a, b) => {
+      if (!("activities" in a.system) || !("activities" in b.system)) return 0;
       if (!Object.values(a.system.activities).some((a) => foundry.utils.hasProperty(a, "activation.type"))) {
         return 1;
       } else if (!Object.values(b.system.activities).some((b) => foundry.utils.hasProperty(b, "activation.type"))) {
         return -1;
       } else {
         const aActionTypeID = DICTIONARY.actions.activationTypes.find(
-          (type) => type.value === Object.values(a.system.activities).find((a) => foundry.utils.hasProperty(a, "activation.type")).activation.type,
+          (type) => "activities" in a.system
+            && type.value === Object.values(a.system.activities)
+              .find((a) => foundry.utils.hasProperty(a, "activation.type")).activation.type,
         ).id;
         const bActionTypeID = DICTIONARY.actions.activationTypes.find(
-          (type) => type.value === Object.values(b.system.activities).find((b) => foundry.utils.hasProperty(b, "activation.type")).activation.type,
+          (type) => "activities" in b.system
+            && type.value === Object.values(b.system.activities)
+              .find((b) => foundry.utils.hasProperty(b, "activation.type")).activation.type,
         ).id;
         if (aActionTypeID > bActionTypeID) {
           return 1;
@@ -457,7 +463,7 @@ export default class CharacterFeatureFactory {
     //   "TlT20Gh1RofymIDY": "Compendium.dnd5e.classfeatures.Item.u4NLajXETJhJU31v",
     //   "2PZlmOVkOn2TbR1O": "Compendium.dnd5e.classfeatures.Item.hpLNiGq7y67d2EHA"
     // }
-    const linkingData = foundry.utils.getProperty(feature, "flags.ddbimporter.advancementLink");
+    const linkingData = foundry.utils.getProperty(feature, "flags.ddbimporter.advancementLink") as IDDBFeaturesAdvancementLinkData[];
     const advancement = feature.system.advancement[id];
     const dataLink = linkingData.find((d) => d._id === advancement._id);
 
@@ -499,6 +505,47 @@ export default class CharacterFeatureFactory {
     }
   }
 
+  #itemChoiceLink(feature: T5eFeatureMixinDataTypes, id:string) {
+    const linkingData = foundry.utils.getProperty(feature, "flags.ddbimporter.advancementLink") as IDDBFeaturesAdvancementLinkData[];
+    const advancement = feature.system.advancement[id];
+    const dataLink = linkingData.find((d) => d._id === advancement._id);
+
+    if (!dataLink || !linkingData || !advancement) {
+      logger.warn(`Advancement for ${feature.name} (id ${id}) missing required data for linking`, {
+        advancement,
+        linkingData,
+        dataLink,
+      });
+      return;
+    }
+
+    const added = {};
+    for (const [advancementFeatureName, uuid] of Object.entries(dataLink.features)) {
+      const characterFeature = this.ddbCharacter.getDataFeature(advancementFeatureName);
+      if (characterFeature) {
+        logger.debug(`Advancement ${advancement._id} found Feature ${advancementFeatureName} (${uuid})`);
+        added[characterFeature._id] = uuid;
+        foundry.utils.setProperty(characterFeature, "flags.dnd5e.sourceId", uuid);
+        foundry.utils.setProperty(
+          characterFeature,
+          "flags.dnd5e.advancementOrigin",
+          `${feature._id}.${advancement._id}`,
+        );
+      }
+    }
+
+    // ItemChoice stores selections keyed by choice level (backgrounds grant at level 0),
+    // unlike ItemGrant's flat `value.added`.
+    if (Object.keys(added).length > 0) {
+      advancement.value = {
+        added: {
+          "0": added,
+        },
+      };
+      feature.system.advancement[id] = advancement;
+    }
+  }
+
   #addGenericAdvancementOrigins(types = ["actions", "features"]) {
     for (const type of types) {
       for (const feature of this.ddbCharacter.data[type]) {
@@ -534,8 +581,9 @@ export default class CharacterFeatureFactory {
       types,
     });
     for (const type of types) {
-      for (const feature of this.ddbCharacter.data[type]) {
-        const linkingData = foundry.utils.getProperty(feature, "flags.ddbimporter.advancementLink");
+      for (const feature of this.ddbCharacter.data[type] as (T5eFeatureMixinDataTypes)[]) {
+        if (!("advancement" in feature.system)) continue;
+        const linkingData = foundry.utils.getProperty(feature, "flags.ddbimporter.advancementLink") as IDDBFeaturesAdvancementLinkData[];
         if (linkingData) {
           logger.debug("Linking Advancements to Features", {
             feature,
@@ -546,6 +594,8 @@ export default class CharacterFeatureFactory {
 
             if (a.type === "ItemGrant" && dataLink) {
               this.#itemGrantLink(feature, id);
+            } else if (a.type === "ItemChoice" && dataLink) {
+              this.#itemChoiceLink(feature, id);
             }
           }
         }
@@ -582,8 +632,11 @@ export default class CharacterFeatureFactory {
       // console.warn("Generating background advancements", ddbFeature);
       await ddbFeature.generateAdvancements();
       await ddbFeature.buildBackgroundFeatAdvancements();
+      await ddbFeature._generateBackgroundEquipment();
     } else if (type === "feat") {
       ddbFeature.generateFeatAbilityScoreAdvancement();
+    } else if(type === "race") {
+      await ddbFeature._generateSpellAdvancements();
     }
     const choiceFeatures = ddbFeature.isChoiceFeature
       ? await DDBChoiceFeature.buildChoiceFeatures(ddbFeature)
@@ -726,7 +779,7 @@ export default class CharacterFeatureFactory {
     return this.ddbData.classOptions
       .filter((feat) => {
         if (!requireLevel || !foundry.utils.hasProperty(feat, "requiredLevel")) return true;
-        const requiredLevel = foundry.utils.getProperty(feat, "requiredLevel");
+        const requiredLevel = foundry.utils.getProperty(feat, "requiredLevel") as number;
         const klass = this.ddbData.character.classes.find((cls) => cls.definition.id === feat.classId
           || cls.subclassDefinition?.id === feat.classId);
         if (!klass) {
@@ -761,7 +814,7 @@ export default class CharacterFeatureFactory {
   }
 
   _setLevelScales(type = "features") {
-    for (const feature of this.parsed[type]) {
+    for (const feature of this.parsed[type] as (T5eFeatureMixinDataTypes)[]) {
       if (foundry.utils.hasProperty(feature, "flags.ddbimporter.skipScale")) continue;
 
       if (DICTIONARY.parsing.levelScale.LEVEL_SCALE_EXCLUSIONS.includes(feature.name)) continue;
@@ -780,12 +833,13 @@ export default class CharacterFeatureFactory {
         damageString: `@scale.${identifier}.${featureName}`,
       });
       if (foundry.utils.hasProperty(feature, "system.damage.base")) {
+        // @ts-expect-error - we know this fie, unsure why not recognized
         feature.system.damage.base.custom = damage.custom;
       } else if (foundry.utils.hasProperty(feature, "system.activities")) {
         for (const [key, activity] of Object.entries(feature.system.activities)) {
-          if (activity.damage && activity.damage.parts.length === 0) {
+          if ("damage" in activity && activity.damage.parts.length === 0) {
             activity.damage.parts = [damage];
-          } else if (activity.damage && activity.damage.parts.length > 0) {
+          } else if ("damage" in activity && activity.damage.parts.length > 0) {
             activity.damage.parts[0].custom = damage.custom;
           }
           feature.system.activities[key] = activity;
@@ -860,7 +914,17 @@ export default class CharacterFeatureFactory {
 
   // helpers
 
-  async getFeatureFromAction({ action, type, isAttack = null, manager = null, extraFlags = {}, enricher = null, usesOnActivity = undefined }) {
+  async getFeatureFromAction({
+    action, type, isAttack = null, manager = null, extraFlags = {}, enricher = null, usesOnActivity = undefined,
+  }: {
+    action: IDDBAction | IDDBConfigNaturalAction;
+    type?: string;
+    isAttack?: boolean | null;
+    manager?: DDBSummonsManager | null;
+    extraFlags?: IActorFlagConfig;
+    enricher?: TDDBFeatureMixinEnrichers;
+    usesOnActivity?: boolean | undefined;
+  }) {
     const isAttackAction = isAttack ?? DDBDataUtils.displayAsAttack(this.ddbData, action, this.rawCharacter);
     const ddbAction = isAttackAction
       ? new DDBAttackAction({
@@ -890,7 +954,7 @@ export default class CharacterFeatureFactory {
     return ddbAction.data;
   }
 
-  getActions({ name, type }) {
+  getActions({ name, type }: { name: string; type: "class" | "race" | "feat" | "background" }): IDDBAction[] {
     const nameMatchedActions = this.ddbData.character.actions[type].filter((a) => utils.nameString(a.name) === utils.nameString(name));
     const levelAdjustedActions = nameMatchedActions.length > 1
       ? nameMatchedActions.filter((a) =>
@@ -902,7 +966,7 @@ export default class CharacterFeatureFactory {
     const actions = levelAdjustedActions.map((a) => {
       a.actionSource = type;
       return a;
-    });
+    }) as IDDBAction[];
     return actions;
   }
 
@@ -1171,47 +1235,48 @@ export default class CharacterFeatureFactory {
           action: foundry.utils.deepClone(action),
           feature: foundry.utils.deepClone(featureMatch),
         });
-        if (Object.keys(action.system.activities).length === 0) {
-          for (const [key, activity] of Object.entries(featureMatch.system.activities)) {
-            // console.warn(`Checking activity ${key}`, activity);
-            if (!action.system.activities[key]) {
-              action.system.activities[key] = activity;
-              continue;
+        if ("activities" in action.system && "activities" in featureMatch.system) {
+          if (Object.keys(action.system.activities).length === 0) {
+            for (const [key, activity] of Object.entries(featureMatch.system.activities)) {
+              // console.warn(`Checking activity ${key}`, activity);
+              if (!action.system.activities[key]) {
+                action.system.activities[key] = activity;
+                continue;
+              }
+              if (action.system.activities[key] && action.system.activities[key].effects?.length === 0) {
+                action.system.activities[key].effects = featureMatch.system.activities[key].effects;
+              }
             }
-            if (action.system.activities[key] && action.system.activities[key].effects?.length === 0) {
-              action.system.activities[key].effects = featureMatch.system.activities[key].effects;
+          } else {
+            for (const key of Object.keys(featureMatch.system.activities)) {
+              if (action.system.activities[key] && action.system.activities[key].effects?.length === 0) {
+                action.system.activities[key].effects = featureMatch.system.activities[key].effects;
+              }
             }
           }
-        } else {
-          for (const key of Object.keys(featureMatch.system.activities)) {
-            if (action.system.activities[key] && action.system.activities[key].effects?.length === 0) {
-              action.system.activities[key].effects = featureMatch.system.activities[key].effects;
+
+          if (Object.keys(featureMatch.system.activities).length === 0
+            && Object.keys(action.system.activities).length > 0
+            && featureMatch.effects.length > 0
+            && action.effects.length === 0
+          ) {
+            for (const key of Object.keys(action.system.activities)) {
+              if (foundry.utils.getProperty(action.system.activities[key], "flags.ddbimporter.noeffect")) continue;
+              const effects = [];
+              for (const effect of featureMatch.effects) {
+
+                if (effect.transfer) continue;
+
+                if (foundry.utils.getProperty(effect, "flags.ddbimporter.noeffect")) continue;
+                const activityNameRequired = foundry.utils.getProperty(effect, "flags.ddbimporter.activityMatch");
+
+                if (activityNameRequired && action.system.activities[key].name !== activityNameRequired) continue;
+                const effectId = effect._id ?? foundry.utils.randomID();
+                effect._id = effectId;
+                effects.push({ _id: effectId });
+              }
+              action.system.activities[key].effects = effects;
             }
-          }
-        }
-
-
-        if (Object.keys(featureMatch.system.activities).length === 0
-          && Object.keys(action.system.activities).length > 0
-          && featureMatch.effects.length > 0
-          && action.effects.length === 0
-        ) {
-          for (const key of Object.keys(action.system.activities)) {
-            if (foundry.utils.getProperty(action.system.activities[key], "flags.ddbimporter.noeffect")) continue;
-            const effects = [];
-            for (const effect of featureMatch.effects) {
-
-              if (effect.transfer) continue;
-
-              if (foundry.utils.getProperty(effect, "flags.ddbimporter.noeffect")) continue;
-              const activityNameRequired = foundry.utils.getProperty(effect, "flags.ddbimporter.activityMatch");
-
-              if (activityNameRequired && action.system.activities[key].name !== activityNameRequired) continue;
-              const effectId = effect._id ?? foundry.utils.randomID();
-              effect._id = effectId;
-              effects.push({ _id: effectId });
-            }
-            action.system.activities[key].effects = effects;
           }
         }
 
@@ -1258,11 +1323,16 @@ export default class CharacterFeatureFactory {
   }
 
 
-  async addSpellAdvancement({ feature, type }: { feature: T5eFeatureMixinDataTypes; type: string }) {
+  async addSpellAdvancement({
+    feature, type, addToAdvancements = true, advancementsOnlyForLimitedUses = false,
+  }: { feature: T5eFeatureMixinDataTypes; type: string; addToAdvancements?: boolean; advancementsOnlyForLimitedUses?: boolean },
+  ) {
     await AdvancementHelper.addSpellAdvancement({
       ddbParser: this,
       feature,
       type,
+      addToAdvancements,
+      advancementsOnlyForLimitedUses,
     });
   }
 
@@ -1281,14 +1351,31 @@ export default class CharacterFeatureFactory {
         }
       }
 
-      await this.addSpellAdvancement({ feature, type });
+      // console.warn(`Adding spell advancements for feature ${feature.name} of type ${type}`, {
+      //   feature: foundry.utils.deepClone(feature),
+      //   type,
+      //   addToAdvancements: true,
+      //   advancementsOnlyForLimitedUses: type === "race",
+      // });
+
+      await this.addSpellAdvancement({
+        feature,
+        type,
+        addToAdvancements: true,
+        advancementsOnlyForLimitedUses: type === "race",
+      });
       featuresToCheck.push({
         feature,
         type,
-        version: feature.system.source?.rules ?? (game.settings.get("dnd5e", "rulesVersion") === "modern" ? "2024" : "2014"),
+        version: feature.system.source?.rules ?? (utils.getSetting<string>("rulesVersion", "dnd5e") === "modern" ? "2024" : "2014"),
       });
     }
 
+    // console.warn("Features to check", {
+    //   featuresToCheckDeep: foundry.utils.deepClone(featuresToCheck),
+    //   this: this,
+    //   grantedSpells: this.spellsGranted[type],
+    // });
     for (const spell of this.ddbCharacter._spellParser._granted[type]) {
       const spellName = foundry.utils.getProperty(spell, "flags.ddbimporter.originalName") ?? spell.name;
 
@@ -1307,7 +1394,17 @@ export default class CharacterFeatureFactory {
         // spell side from the normalised item name (U+0027) — quirk #21.
         && sg.spells.some((g) => matchesGrantingFeature(g, spellName)))
       ) {
-        logger.debug(`Spell ${spell.name} already granted via feature, skipping`);
+        // console.warn(`Spell ${spell.name} already granted via feature, skipping`, {
+        //   spell,
+        //   allwaysPrepared: spell.system.prepared ===  CONFIG.DND5E.spellPreparationStates.always.value,
+        //   method: spell.system.method,
+        // });
+        if (spell.system.prepared ===  CONFIG.DND5E.spellPreparationStates.always.value && !["innate", "atwill"].includes(spell.system.method)) {
+          logger.debug(`Spell ${spell.name} already granted via feature but is always prepared, adding for spell list`);
+          this.ddbCharacter.raw.spells.push(spell);
+        } else {
+          logger.debug(`Spell ${spell.name} already granted via feature, skipping`);
+        }
         continue;
       }
       logger.debug(`Adding spell ${spell.name} directly as not granted via feature`);

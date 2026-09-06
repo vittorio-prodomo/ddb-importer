@@ -15,8 +15,8 @@
  * comes from.
  */
 
-/** Features whose text can carry the clause. */
-export const SLEEP_IMMUNITY_FEATURES = ["Fey Ancestry", "Trance", "Constructed Resilience"];
+/** Features whose text can carry the clause. ("Everlasting" = the Reborn lineage, upstream 7.1.33.) */
+export const SLEEP_IMMUNITY_FEATURES = ["Fey Ancestry", "Trance", "Constructed Resilience", "Everlasting"];
 
 /**
  * ⚠️ The clause uses a CURLY apostrophe (U+2019). DDB's own text does too, so

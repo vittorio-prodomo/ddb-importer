@@ -30,9 +30,14 @@ export function resolveRaceGrantingTrait(ddb: any, componentId: number): IRacial
   const choice = (ddb?.character?.choices?.race ?? []).find(
     (c: any) => c.optionValue !== null && c.optionValue !== undefined && c.optionValue === componentId,
   );
-  if (!choice) return null;
+  if (choice) return asLookup(traits.find((t: any) => t.definition?.id === choice.componentId));
 
-  return asLookup(traits.find((t: any) => t.definition?.id === choice.componentId));
+  // Upstream 7.1.22's case (merged for T228): the id is a race OPTION (e.g. an ASI
+  // choice) listed under `options.race`, whose `componentId` names the owning trait.
+  const option = (ddb?.character?.options?.race ?? []).find((o: any) => o?.definition?.id === componentId);
+  if (!option) return null;
+
+  return asLookup(traits.find((t: any) => t.definition?.id === option.componentId));
 }
 
 /**

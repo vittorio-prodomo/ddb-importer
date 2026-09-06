@@ -44,7 +44,7 @@ export default class EldritchCannon extends DDBEnricherData {
         },
       },
       data: {
-        id: "summonEldriComp1",
+        _id: "summonEldriComp1",
         creatureSizes: ["sm", "tiny"],
       },
     };
@@ -107,5 +107,20 @@ export default class EldritchCannon extends DDBEnricherData {
         },
       },
     ];
+  }
+
+  get override(): IDDBOverrideData {
+    const uses = this.is2014
+      ? this._getUsesWithSpent({
+        type: "class",
+        name: "Create Eldritch Cannon",
+      })
+      : this._getUsesWithSpent({
+        type: "class",
+        name: "Create Eldritch Cannon",
+      });
+    return {
+      uses,
+    };
   }
 }

@@ -82,3 +82,21 @@ test("leaves other racial traits to the normal innate parse", () => {
     assert.equal(isCastActivityRacialTrait(name), false, name || "(empty)");
   }
 });
+
+// --- upstream 7.1.22's race-OPTION hop, folded in for the T228 merge ---
+test("resolves an id that is a race OPTION through options.race[].componentId", () => {
+  const ASI_OPTION = 4221001;
+  const data = ddb();
+  (data.character as any).options = { race: [{ definition: { id: ASI_OPTION, name: "Ability Score Increase" }, componentId: 13856111 }] };
+
+  const trait = resolveRaceGrantingTrait(data, ASI_OPTION);
+
+  assert.equal(trait?.name, "Fey Ancestry");
+});
+
+test("choices.race wins over options.race when both could answer", () => {
+  const data = ddb({ choices: [lineageChoice] });
+  (data.character as any).options = { race: [{ definition: { id: DROW_OPTION, name: "Drow" }, componentId: 13856111 }] };
+
+  assert.equal(resolveRaceGrantingTrait(data, DROW_OPTION)?.name, "Elven Lineage Spells");
+});

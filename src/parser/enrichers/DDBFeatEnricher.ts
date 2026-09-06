@@ -24,11 +24,11 @@ export default class DDBFeatEnricher extends DDBEnricherFactoryMixin {
     });
   }
 
-  NAME_HINTS_2014: Record<string, any> = {};
+  NAME_HINTS_2014: Record<string, string> = {};
 
-  NAME_HINTS: Record<string, any> = {};
+  NAME_HINTS: Record<string, string> = {};
 
-  NAME_HINT_INCLUDES: Record<string, any> = {
+  NAME_HINT_INCLUDES: Record<string, string> = {
     "Ritual Caster (": "Ritual Caster",
     // Covers the Cleric/Druid/Sorcerer/Warlock/Wizard variants in one entry.
     "Magic Initiate (": "Magic Initiate",
@@ -37,7 +37,7 @@ export default class DDBFeatEnricher extends DDBEnricherFactoryMixin {
     "Greater Mark of ": "Greater Mark of",
   };
 
-  ENRICHERS: Record<string, any> = {
+  ENRICHERS: Record<string, EnricherConstructor> = {
     None: GenericEnrichers.None,
     Generic: FeatEnrichers.Generic,
     "Unarmed Strike": GenericEnrichers.UnarmedStrike,
@@ -87,7 +87,7 @@ export default class DDBFeatEnricher extends DDBEnricherFactoryMixin {
     "Martial Adept: Trip Attack": ClassEnrichers.Fighter.ManeuverTripAttack,
   };
 
-  FALLBACK_ENRICHERS: Record<string, any> = {
+  FALLBACK_ENRICHERS: Record<string, EnricherConstructor> = {
     Generic: FeatEnrichers.Generic,
   };
 }

@@ -1,4 +1,3 @@
-import { SETTINGS } from "../../../../config/_module";
 import { DDBCompendiumFolders, DDBItemImporter, utils } from "../../../../lib/_module";
 import DDBEnricherData from "../../data/DDBEnricherData";
 
@@ -343,9 +342,12 @@ export default class ExperimentalElixir extends DDBEnricherData {
         };
         result.build.generateSpell = true;
         result.overrides.addSpellUuid = "Alter Self";
-        result.overrides.data.spell = {
+
+        const data = result.overrides.data as I5eCastActivity;
+        data.spell = {
           spellbook: false,
         };
+        result.overrides.data = data;
       }
       return result;
     });
@@ -611,7 +613,7 @@ export default class ExperimentalElixir extends DDBEnricherData {
 
   async buildItem(row) {
     const itemData = this.getSkeletonItem(row);
-    for (const [key, value] of Object.entries(this.data.system.activities as Record<string, IActivityData>)) {
+    for (const [key, value] of Object.entries(this.data.system.activities as Record<string, I5eActivity>)) {
       if (!foundry.utils.getProperty(value, "flags.ddbimporter.isElixirAdditionalActivity")) continue;
       if (!value.name.endsWith(row.name)) continue;
       foundry.utils.setProperty(itemData, `system.activities.${key}`, value);
@@ -647,7 +649,7 @@ export default class ExperimentalElixir extends DDBEnricherData {
   async importElixirs() {
     const updateFeatures = this.ddbParser.ddbCharacter.updateCompendiumItems
       ?? this.ddbParser.ddbCharacter.forceCompendiumUpdate
-      ?? game.settings.get(SETTINGS.MODULE_ID, "character-update-policy-update-add-features-to-compendiums");
+      ?? utils.getSetting<boolean>("character-update-policy-update-add-features-to-compendiums");
 
     const featureHandler = await DDBItemImporter.buildHandler("features", this.elixirs, updateFeatures, ExperimentalElixir.featureHandlerOptions, this.handler);
     await featureHandler.buildIndex(ExperimentalElixir.featureHandlerOptions.indexFilter);

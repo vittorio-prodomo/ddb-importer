@@ -6,7 +6,7 @@ import { DDBModifiers } from "../lib/_module";
 import TraitAdvancement from "dnd5e/dnd5e/module/documents/advancement/trait.mjs";
 import type CharacterFeatureFactory from "../features/CharacterFeatureFactory";
 import { matchesGrantingFeature } from "../spells/grantedSpellRows";
-import { parseAlwaysPreparedGrant } from "./alwaysPreparedGrant";
+import { parseAlwaysPreparedGrants } from "./alwaysPreparedGrant";
 
 function htmlToText(html) {
   // keep html brakes and tabs
@@ -67,6 +67,26 @@ interface IAdvancementGetterCantripChoiceAdvancement extends IAdvancementGetterC
   choiceLevel?: number;
   count?: number;
   allowReplacements?: boolean;
+}
+
+type TPreparedValue =
+  typeof CONFIG.DND5E.spellPreparationStates.always.value
+  | typeof CONFIG.DND5E.spellPreparationStates.prepared.value
+  | typeof CONFIG.DND5E.spellPreparationStates.unprepared.value;
+
+interface IAdvancementGetterSpellGrantAdvancement {
+  spellGrants: ISpellAdvancementGrant[];
+  abilities?: string[];
+  hint?: string;
+  name: string;
+  spellLinks: TSpellLinks;
+  method?: "innate" | "spell" | "pact";
+  requireSlot?: boolean;
+  prepared?: TPreparedValue;
+  level?: number | string;
+  is2024: boolean;
+  forceNoAmount?: boolean;
+  spellData?: I5eSpellItem[];
 }
 
 export default class AdvancementHelper {
@@ -167,24 +187,28 @@ export default class AdvancementHelper {
   getToolChoicesFromOptions(feature: TFeature, level: number) {
     const toolsChosen = new Set<string>();
     const toolChoices = new Set<string>();
+    const toolDefaults = new Set<string>();
+    let count = 0;
 
     const choiceDefinitions = this.ddbData.character.choices.choiceDefinitions;
 
     this.ddbData.character.choices[this.type].filter((choice) =>
       feature.id === choice.componentId
-      && "requiredLevel" in feature && feature.requiredLevel === level
+      // backgrounds have no requiredLevel, so match those at any level
+      && (!("requiredLevel" in feature) || feature.requiredLevel === level)
       && choice.subType === 1
       && choice.type === 2,
     ).forEach((choice) => {
       const optionChoice = choiceDefinitions.find((selection) => selection.id === `${choice.componentTypeId}-${choice.type}`);
       if (!optionChoice) return;
       const option = optionChoice.options.find((option) => option.id === choice.optionValue);
-      if (!option) return;
-      const smallChosen = DICTIONARY.actor.proficiencies.find((prof) =>
-        prof.type === "Tool"
-        && prof.name === option.label
-        && prof.baseTool,
-      );
+      const smallChosen = option
+        ? DICTIONARY.actor.proficiencies.find((prof) =>
+          prof.type === "Tool"
+          && prof.name === option.label
+          && prof.baseTool,
+        )
+        : undefined;
       if (smallChosen) {
         const toolStub = smallChosen.toolType === ""
           ? smallChosen.baseTool
@@ -199,17 +223,31 @@ export default class AdvancementHelper {
         .map((option) =>
           DICTIONARY.actor.proficiencies.find((prof) => prof.type === "Tool" && prof.name === option.label),
         );
+      // only count choice entries that actually resolve to tools (skip skill choices)
+      if (optionNames.length > 0) count += 1;
       optionNames.forEach((tool) => {
         const toolStub = tool.toolType === ""
           ? tool.baseTool
           : `${tool.toolType}:${tool.baseTool}`;
         toolChoices.add(toolStub);
       });
+      // the rules default for this choice (DDB keeps this even when the modifier is
+      // dropped because the default is already owned elsewhere); skill defaults won't
+      // match a tool proficiency so they are naturally excluded
+      (choice.defaultSubtypes ?? []).forEach((label) => {
+        const prof = DICTIONARY.actor.proficiencies.find((p) =>
+          p.type === "Tool" && p.name === label && p.baseTool);
+        if (prof) {
+          toolDefaults.add(prof.toolType === "" ? prof.baseTool : `${prof.toolType}:${prof.baseTool}`);
+        }
+      });
     });
 
     return {
       chosen: Array.from(toolsChosen),
       choices: Array.from(toolChoices),
+      defaults: Array.from(toolDefaults),
+      count,
     };
   }
 
@@ -676,8 +714,49 @@ export default class AdvancementHelper {
     return advancement;
   }
 
+  // Build a tool advancement from a background's tool choice when there are no tool
+  // modifiers. Most backgrounds grant a single (default) tool via the choice's selected
+  // option, so grant that; only fall back to the full option pool when nothing is
+  // selected (a genuine unselected choice). Returns null when there is no tool choice.
+  getEmptyToolAdvancement({ feature, level }: { feature: TFeature; level: number }): TraitAdvancement | null {
+    const toolChoices = this.getToolChoicesFromOptions(feature, level);
+    if (toolChoices.choices.length === 0) return null;
 
-  getArmorAdvancement({ mods, feature, availableToMulticlass, level }: IAdvancementGetterOptions): TraitAdvancement {
+    const advancement = new game.dnd5e.documents.advancement.TraitAdvancement();
+    advancement.updateSource({
+      title: feature.name && !feature.name.startsWith("Background:") && !feature.name.startsWith("Core ") && !feature.name.startsWith("Proficiencies")
+        ? feature.name
+        : "Tool Proficiencies",
+      configuration: {
+        allowReplacements: true,
+      },
+      level: level,
+    });
+
+    // prefer the player's actual selection, then the rules default; only fall back to
+    // the full swap pool when there is neither
+    const grants = toolChoices.chosen.length > 0
+      ? toolChoices.chosen
+      : toolChoices.defaults;
+
+    if (grants.length > 0) {
+      // single granted/default tool, swappable via allowReplacements
+      AdvancementHelper.advancementUpdate(advancement, {
+        grants: grants.map((choice) => `tool:${choice}`),
+      });
+    } else {
+      // genuine unselected choice: offer the full pool for the player to pick from
+      AdvancementHelper.advancementUpdate(advancement, {
+        pool: toolChoices.choices.map((choice) => `tool:${choice}`),
+        count: toolChoices.count || 1,
+      });
+    }
+
+    return advancement;
+  }
+
+
+  getArmorAdvancement({ mods, feature, availableToMulticlass, level }: IAdvancementGetterOptions): TraitAdvancement | null {
     const baseProficiency = AdvancementHelper.isBaseProficiency(feature);
     const proficiencyMods = DDBModifiers.filterModifiers(mods, "proficiency");
     const armorMods = proficiencyMods
@@ -2340,23 +2419,24 @@ export default class AdvancementHelper {
 
     // You can cast either the barkskin or spike growth spell once, and you must complete a long rest before you can cast either spell again
     // You gain the ability to cast the spell cure wounds without using a spell slot, up to a number of times equal to half your proficiency bonus
-    const canCastRegex = /you (?:can|gain the ability to) (?:also )?cast (?:the |either the )?(.+?)(?: spells?,?)? (once|an unlimited number of times|on yourself|as a \d+(?:st|nd|rd|th)[- ]level spell once|without using a spell slot, up to a number of times equal to half your proficiency bonus)/ig;
+    const canCastRegex = /(?:When you reach (\d)(?:st|nd|rd|th) level, )?you (?:can|gain the ability to) (?:also )?cast (?:the |either the )?(.+?)(?: spells?,?)? (once|an unlimited number of times|on yourself|as a \d+(?:st|nd|rd|th)[- ]level spell once|without using a spell slot, up to a number of times equal to half your proficiency bonus)/ig;
     const canCastMatches = strippedDescription.matchAll(canCastRegex);
 
     for (const match of canCastMatches) {
-      const spells = match[1]
+      const spells = match[2]
         .replace("spell", "")
         .replaceAll(" or ", " and ")
         .split(" and ")
         .map((s) => s.toLowerCase().trim());
-      const unlimited = match[2] && match[2].includes("unlimited");
-      const halfProficiency = match[2] && match[2].includes("half your proficiency bonus");
+      const unlimited = match[3] && match[3].includes("unlimited");
+      const halfProficiency = match[3] && match[3].includes("half your proficiency bonus");
       for (const spell of spells) {
         if (["it"].includes(spell)) continue;
         if (spellsAdded.has(spell)) continue;
         spellsAdded.add(spell);
+        const level = match[1] ? parseInt(match[1]) : 1;
         result.spellGrants.push({
-          level: 1,
+          level,
           name: spell,
           amount: unlimited
             ? ""
@@ -2385,13 +2465,15 @@ export default class AdvancementHelper {
     // same sentence but describe the free cast differently. Resolving that is delegated so the
     // wording cases can be unit-tested — and so a PRONOUN is never taken for a spell name:
     // "it" resolves to no compendium spell, which silently costs the feature its Cast activity
-    // and leaves the grant to be pushed as a duplicate innate row instead.
-    const alwaysPreparedSpell = parseAlwaysPreparedGrant(strippedDescription);
-    if (alwaysPreparedSpell) {
-      const spell = alwaysPreparedSpell;
-      if (!spellsAdded.has(spell)) {
+    // and leaves the grant to be pushed as a duplicate innate row instead. Upstream 7.1.22+
+    // added a level prefix ("When you reach 3rd level, …") and plural grants ("the X and Y
+    // spells prepared"); both live in the same helper (7.1.x merge, T228).
+    const alwaysPrepared = parseAlwaysPreparedGrants(strippedDescription);
+    if (alwaysPrepared) {
+      for (const spell of alwaysPrepared.spells) {
+        if (spellsAdded.has(spell)) continue;
         result.spellGrants.push({
-          level: 1,
+          level: alwaysPrepared.level,
           name: spell,
           amount: "1",
         });
@@ -2614,6 +2696,93 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
     return result;
   }
 
+  static getHTMLDataForSpellAdvancements(description: string, species: string): IParsedSpellAdvancementData {
+    const htmlData = description.includes("Choose a lineage from the")
+      || description.includes("Choose a legacy from the")
+      ? AdvancementHelper.parseHTMLTableSpellAdvancementData({
+        description,
+        species,
+      })
+      : description.includes(" Choose one of the following options")
+        ? AdvancementHelper.parseHTMLPTagSpellAdvancementData({
+          description,
+          species,
+        })
+        // : AdvancementHelper.parseHTMLSpellAdvancementData(description);
+        : AdvancementHelper.parseHTMLSpellAdvancementDataForTraits(description);
+    return htmlData;
+  }
+
+  static async getTraitSpellAdvancements({ name, species, description, is2024 }: { name: string; species: string; description: string; is2024: boolean }, spellLinks: TSpellLinks) {
+    const advancements = [];
+    const htmlData = AdvancementHelper.getHTMLDataForSpellAdvancements(description, species);
+
+    const abilityData = AdvancementHelper.parseHTMLSpellCastingAbilities(description);
+    const advancementName = name.toLowerCase().includes("spell")
+      ? name
+      : `${name} (Spells)`;
+
+    const hint = htmlData.hint !== "" ? htmlData.hint : abilityData.hint;
+
+    logger.debug(`Spell Advancement Data from ${name}`, {
+      htmlData,
+      this: this,
+      trait: {
+        description,
+        name,
+        fullName: species,
+      },
+      abilityData,
+      name: advancementName,
+      hint,
+    });
+
+    const cantripChoiceAdvancement = await AdvancementHelper.getCantripChoiceAdvancement({
+      choices: htmlData.cantripChoices,
+      abilities: abilityData.abilities,
+      hint,
+      name: advancementName,
+      spellListChoice: htmlData.spellListCantripChoice,
+      spellLinks,
+      is2024,
+    });
+    if (cantripChoiceAdvancement) {
+      advancements.push(cantripChoiceAdvancement);
+    }
+
+    const cantripGrantAdvancement = await AdvancementHelper.getCantripGrantAdvancement({
+      choices: htmlData.cantripGrants,
+      abilities: abilityData.abilities,
+      hint,
+      name: advancementName,
+      spellLinks,
+      is2024,
+    });
+    if (cantripGrantAdvancement) {
+      advancements.push(cantripGrantAdvancement);
+    }
+
+    for (const spellGrant of htmlData.spellGrants) {
+      const spellGrantAdvancement = await AdvancementHelper.getSpellGrantAdvancement({
+        spellGrants: [spellGrant],
+        abilities: abilityData.abilities,
+        hint,
+        name,
+        spellLinks,
+        is2024,
+      });
+      if (spellGrantAdvancement) {
+        advancements.push(spellGrantAdvancement);
+      }
+      // TO DO: add cast via slot
+    }
+
+    logger.debug("Spell Advancements", {
+      advancements,
+    });
+
+    return advancements;
+  }
 
   static CONDITION_MAPPING = {
     "resistance": "dr",
@@ -2744,7 +2913,7 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
     // You have resistance to the damage type associated with your * Ancestry.
     const dragonMatch = textDescription.match(/resistance to the damage type associated with your (\w*) Ancestry/mi);
     if (dragonMatch) {
-      parsedConditions.count = 1;
+      parsedConditions.number = 1;
       parsedConditions.hint = textDescription;
       switch (dragonMatch[1].toLowerCase()) {
         case "metallic": {
@@ -2782,9 +2951,27 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
       }
     }
 
+    // You have Resistance to one of the following damage types of your choice: Cold, Necrotic, or Poison.
+    if (textDescription.includes("resistance to one of the following damage types of your choice")) {
+      parsedConditions.number = 1;
+      parsedConditions.hint = textDescription;
+      const reg = /resistance to one of the following damage types of your choice: (.*?)(\.|$)/i;
+      const match = textDescription.match(reg);
+      if (match) {
+        const damageTypes = match[1]
+          .replace(" or ", ",")
+          .replaceAll(",,", ",")
+          .split(",")
+          .map((dmg) => dmg.toLowerCase().trim());
+        for (const dr of damageTypes) {
+          choices.add(`dr:${dr}`);
+        }
+      }
+    }
+
     // You now have resistance to a damage type determined by your patron’s kind:
     if (textDescription.includes("resistance to a damage type determined by your patron’s kind:")) {
-      parsedConditions.count = 1;
+      parsedConditions.number = 1;
       parsedConditions.hint = textDescription;
       ["bludgeoning", "thunder", "fire", "cold"].forEach((dr) => {
         if (textDescription.includes(dr)) {
@@ -3069,8 +3256,8 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
   static async getSpellGrantAdvancement({
     spellGrants, abilities = [], hint = "", name, spellLinks, method = "innate",
     requireSlot = false, prepared = CONFIG.DND5E.spellPreparationStates.always.value,
-    level, is2024, forceNoAmount = false, spellData = [],
-  } = {}) {
+    level = null, is2024, forceNoAmount = false, spellData = [],
+  }: IAdvancementGetterSpellGrantAdvancement) {
     const spellGrant = spellGrants[0];
     const uuids = await AdvancementHelper._getSpellUuidsFromFeatureSpellData(spellGrants.map((g) => g.name), spellData, is2024);
 
@@ -3085,9 +3272,9 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
       level: level ?? spellGrant.level,
     });
 
-    advancement.updateSource({
+    const update: I5eAdvancementItemGrant = {
       title: name,
-      level: level ? parseInt(level) : parseInt(spellGrant.level),
+      level: level ? parseInt(String(level)) : parseInt(String(spellGrant.level)),
       configuration: {
         items: uuids.map((s) => {
           return {
@@ -3114,13 +3301,17 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
         },
       },
       hint,
-    });
+    };
+    advancement.updateSource(update as any);
 
     return advancement;
   }
 
 
-  static async addSpellAdvancement({ ddbParser, feature, type }: { ddbParser: CharacterFeatureFactory; feature: T5eFeatureMixinDataTypes; type: string }) {
+  static async addSpellAdvancement({
+    ddbParser, feature, type, addToAdvancements = true, advancementsOnlyForLimitedUses = false,
+  }: { ddbParser: CharacterFeatureFactory; feature: T5eFeatureMixinDataTypes; type: string; addToAdvancements?: boolean; advancementsOnlyForLimitedUses?: boolean },
+  ) {
     // ⚠️ `advancement`, SINGULAR — dnd5e's field is an AdvancementCollectionField
     // (a MappingField, so source data is an object keyed by id, which is exactly
     // what the write at the end of this method assumes). The guard was spelled
@@ -3132,7 +3323,9 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
     if (!("activities" in feature.system)) return;
     const advancements = [];
 
-    const htmlData = AdvancementHelper.parseHTMLSpellAdvancementDataForTraits(feature.system.description.value);
+    const htmlData = type === "race"
+      ? AdvancementHelper.getHTMLDataForSpellAdvancements(feature.system.description.value, ddbParser.ddbCharacter?._ddbRace.fullName)
+      : AdvancementHelper.parseHTMLSpellAdvancementDataForTraits(feature.system.description.value);
 
     const abilityData = AdvancementHelper.parseHTMLSpellCastingAbilities(feature.system.description.value);
     const name = feature.name.toLowerCase().includes("spell")
@@ -3173,7 +3366,7 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
       name: cantripName,
       spellListChoice: htmlData.spellListCantripChoice,
       spellLinks: ddbParser.spellLinks,
-      is2024: ddbParser.is2024,
+      is2024: use2024Spells,
       count: htmlData.spellListCantripChoiceNum ?? 1,
       allowReplacements: htmlData.spellListChoiceReplace,
       spellData,
@@ -3336,11 +3529,13 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
         } else {
           activity.data.uses = uses;
         }
-        feature.system.activities[activity.data._id] = activity.data;
-
-        ddbParser.spellsGranted[type].push({ feature: feature.name, spells: [spellGrant.name], use2024Spells });
-
-        logger.warn(`Added spell activity for ${spellGrant.name} to feature ${feature.name}`);
+        if (advancementsOnlyForLimitedUses) {
+          logger.debug(`Not adding spell activity for ${spellGrant.name} to feature ${feature.name} as advancementOnlyForLimitedUses is true`);
+        } else {
+          feature.system.activities[activity.data._id] = activity.data;
+          ddbParser.spellsGranted[type].push({ feature: feature.name, spells: [spellGrant.name], use2024Spells });
+          logger.debug(`Added spell activity for ${spellGrant.name} to feature ${feature.name}`);
+        }
 
       }
     }
@@ -3366,10 +3561,14 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
       feature,
     });
 
-    advancements.forEach((advancement) => {
-      const a = advancement.toObject();
-      feature.system.advancement[a._id] = a;
-    });
+    if (addToAdvancements) {
+      advancements.forEach((advancement) => {
+        const a = advancement.toObject();
+        feature.system.advancement[a._id] = a;
+      });
+    }
+
+    return advancements;
   }
 
 }

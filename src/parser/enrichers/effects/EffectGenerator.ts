@@ -719,7 +719,7 @@ export default class EffectGenerator {
     }
   }
 
-  _generateEffectDurationFromDocument(activity: IActivityData | null = null) {
+  _generateEffectDurationFromDocument(activity: I5eActivity | null = null) {
     const duration = {
       seconds: null,
       startTime: null,
@@ -785,7 +785,7 @@ export default class EffectGenerator {
     const canAttune = ("canAttune" in this.ddbItem.definition && this.ddbItem.definition?.canAttune) ?? false;
     const isConsumable = ("isConsumable" in this.ddbItem.definition && this.ddbItem.definition?.isConsumable) ?? false;
     const isEquipped = ("equipped" in this.ddbItem && this.ddbItem.equipped) ?? false;
-    const isAttuned = ("attuned" in this.ddbItem && this.ddbItem.attuned) ?? false;
+    const isAttuned = ("isAttuned" in this.ddbItem && this.ddbItem.isAttuned) ?? false;
     const filterType = ("filterType" in this.ddbItem.definition && this.ddbItem.definition?.filterType) ?? null;
 
     if (

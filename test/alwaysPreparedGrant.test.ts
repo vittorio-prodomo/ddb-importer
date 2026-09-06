@@ -58,3 +58,33 @@ test("reads through an @UUID enricher link — the linker runs before the grant 
 
   assert.equal(parseAlwaysPreparedGrant(desc), "hunter’s mark");
 });
+
+// --- upstream 7.1.22 wording, folded into the helper for the T228 merge ---
+import { parseAlwaysPreparedGrants } from "../src/parser/advancements/alwaysPreparedGrant.ts";
+
+test("reads the level a grant arrives at from the 'When you reach Nth level' prefix", () => {
+  const desc = "When you reach 3rd level, you always have the Misty Step spell prepared. "
+    + "You can cast it once without a spell slot.";
+
+  assert.deepEqual(parseAlwaysPreparedGrants(desc), { level: 3, spells: ["misty step"] });
+});
+
+test("splits a PLURAL grant into its spells", () => {
+  const desc = "You always have the Bless and Cure Wounds spells prepared. You can cast each spell once without a spell slot.";
+
+  assert.deepEqual(parseAlwaysPreparedGrants(desc), { level: 1, spells: ["bless", "cure wounds"] });
+  assert.deepEqual(
+    parseAlwaysPreparedGrants("You always have the Faerie Fire, Darkness, and Dancing Lights spells prepared."),
+    { level: 1, spells: ["faerie fire", "darkness", "dancing lights"] },
+  );
+});
+
+test("does NOT split a singular grant whose name contains 'and'", () => {
+  const desc = "You always have the Protection from Evil and Good spell prepared.";
+
+  assert.deepEqual(parseAlwaysPreparedGrants(desc), { level: 1, spells: ["protection from evil and good"] });
+});
+
+test("the single-spell wrapper still answers the first spell", () => {
+  assert.equal(parseAlwaysPreparedGrant("You always have the Bless and Cure Wounds spells prepared."), "bless");
+});

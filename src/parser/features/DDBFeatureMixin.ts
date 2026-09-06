@@ -21,7 +21,7 @@ import {
   SystemHelpers,
 } from "../lib/_module";
 import type DDBCharacter from "../DDBCharacter";
-import { IDDBSourceResponse } from "../../lib/DDBSources";
+import { type IDDBSourceResponse } from "../../lib/DDBSources";
 
 interface IDDBFeatureMixinActionType {
   class?: {
@@ -36,9 +36,9 @@ type TDocumentType = Extract<TFeatureType, "background" | "feat"> | "weapon";
 
 interface IDDBFeatureMixin {
   ddbData: IDDBData;
-  ddbDefinition: TDDBFeatureMixinDefinitions;
+  ddbDefinition: TDDBFeatureMixinFeatures | TDDBFeatureMixinDefinitions | IDDBAction | IDDBConfigNaturalAction;
   type: string;
-  source: IDDBSourceResponse;
+  source?: IDDBSourceResponse;
   documentType?: TDocumentType;
   rawCharacter?: I5ePCData | null;
   activityType?: IDDBActivityType | null;
@@ -89,7 +89,7 @@ export default class DDBFeatureMixin extends DDBActivityFactoryMixin<TDocumentTy
   snippet: string;
   description: string;
   resourceCharges: number | null;
-  ddbFeature: TDDBFeatureMixinFeatures | TDDBFeatureMixinDefinitions;
+  ddbFeature: TDDBFeatureMixinFeatures | TDDBFeatureMixinDefinitions | IDDBAction | IDDBConfigNaturalAction;
   // current choice option context, set transiently during DDBChoiceFeature.build()
   _currentChoice: any | null;
   declare ddbDefinition: TDDBFeatureMixinDefinitions;
@@ -694,11 +694,16 @@ export default class DDBFeatureMixin extends DDBActivityFactoryMixin<TDocumentTy
 
   getDamage(bonuses = []): I5eDamagePart {
     const damageType = this.getDamageType();
+    const damageTypes = damageType ? [damageType] : [];
+    if (this.originalName === "Unarmed Strike"
+      && DDBDataUtils.hasSpeciesTrait({ ddbData: this.ddbData, traitName: "Feral Pounce" })) {
+      damageTypes.push("slashing");
+    }
     const damage: I5eDamagePart = {
       number: null,
       denomination: null,
       bonus: "",
-      types: damageType ? [damageType] : [],
+      types: damageTypes,
       custom: {
         enabled: false,
         formula: "",
@@ -752,6 +757,11 @@ export default class DDBFeatureMixin extends DDBActivityFactoryMixin<TDocumentTy
 
   getMartialArtsDamage(bonuses = []): I5eDamagePart {
     const damageType = this.getDamageType();
+    const damageTypes = damageType ? [damageType] : [];
+    if (this.originalName === "Unarmed Strike"
+      && DDBDataUtils.hasSpeciesTrait({ ddbData: this.ddbData, traitName: "Feral Pounce" })) {
+      damageTypes.push("slashing");
+    }
     // @ts-expect-error - dice and die are a mess in data.
     const actionDie = this.ddbDefinition.dice
       // @ts-expect-error - dice and die are a mess in data.
@@ -767,7 +777,7 @@ export default class DDBFeatureMixin extends DDBActivityFactoryMixin<TDocumentTy
       number: null,
       denomination: null,
       bonus: "",
-      types: damageType ? [damageType] : [],
+      types: damageTypes,
       custom: {
         enabled: false,
         formula: "",
@@ -1013,10 +1023,19 @@ export default class DDBFeatureMixin extends DDBActivityFactoryMixin<TDocumentTy
       if (categories.some((c) => c.tagName === "Origin")) return "origin";
       else if (categories.some((c) => c.tagName === "Fighting Style")) return "fightingStyle";
       else if (categories.some((c) => c.tagName === "Epic Boon")) return "epicBoon";
+      else if (categories.some((c) => c.tagName === "Dragonmark")) return "dragonmark";
+      else if (categories.some((c) => c.tagName === "Dark Gift")) return "darkGift";
+      else if (categories.some((c) => c.tagName === "General")) return "general";
       else if (name.startsWith("Mark of ")) return "dragonmark";
       else if (name.startsWith("Greater Mark of ")) return "dragonmark";
       else if (name.includes("Dragonmark") || name.includes("Greater Aberrant Mark")) return "dragonmark";
-      else return "general";
+      logger.debug(`Unknown feat category for ${name}, defaulting to general`, {
+        this: this,
+        categories,
+        name,
+        type,
+      });
+      return "general";
     }
     return null;
   }

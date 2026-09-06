@@ -5,14 +5,19 @@ import { resolveTransformProfileUuids } from "../../companions/types/TransformPr
 import { DDBDataUtils, DDBDescriptions } from "../../lib/_module";
 import { AutoEffects, EnchantmentEffects, ChangeHelper } from "../effects/_module";
 
-export default abstract class DDBEnricherFactoryMixin {
+export default abstract class DDBEnricherFactoryMixin<THint = string> {
 
-  NAME_HINTS_2014: Record<string, string> = {};
+  NAME_HINTS_2014: Record<string, THint> = {};
   NAME_HINT_2014_INCLUDES: Record<string, string> = {};
-  NAME_HINTS: Record<string, string> = {};
+  NAME_HINTS: Record<string, THint> = {};
   NAME_HINT_INCLUDES: Record<string, string> = {};
-  ENRICHERS: Record<string, any> = {};
-  FALLBACK_ENRICHERS: Record<string, any> = {};
+  // Kept as `any` deliberately: this is the permissive supertype that subclasses narrow.
+  // The mixin consumes ENRICHERS flat (`new this.ENRICHERS[hint]`) while some subclasses
+  // (e.g. DDBMonsterFeatureEnricher) override it with a nested shape; tightening the base to
+  // either shape would break the other subclass's property override. Subclasses type their own
+  // maps with `Record<string, EnricherConstructor>` (see data/DDBEnricherData.ts).
+  abstract ENRICHERS: Record<string, any>;
+  abstract FALLBACK_ENRICHERS: Record<string, any>;
 
   ddbParser: any;
   document: any;
@@ -66,10 +71,10 @@ export default abstract class DDBEnricherFactoryMixin {
 
   _getNameHint(): void {
     if (this.isCustomAction) return;
-    const fullHint = (this.is2014 ? this.NAME_HINTS_2014[this.name!] : null)
+    const raw = (this.is2014 ? this.NAME_HINTS_2014[this.name!] : null)
       ?? this.NAME_HINTS[this.name!];
-    if (fullHint) {
-      this.hintName = fullHint;
+    if (typeof raw === "string") {
+      this.hintName = raw;
       return;
     }
 
@@ -646,7 +651,7 @@ export default abstract class DDBEnricherFactoryMixin {
       // Link the spell edition the granting feature belongs to. Defaulting to 2014
       // silently mislinked 2024 features, and where a pack carries only the 2024
       // copy of a spell (Toll the Dead) the lookup found nothing and left the
-      // Cast activity with no spell at all.
+      // Cast activity with no spell at all. (Upstream 7.1.x passes the same flag now.)
       await this._addCompendiumSpellToCastActivity(overrideData.addSpellUuid, activity, {
         use2024Spells: this.is2024 ?? false,
       });

@@ -1,4 +1,3 @@
-import { SETTINGS } from "../../../config/_module";
 import { DDBCompendiumFolders, DDBItemImporter, CompendiumHelper, utils } from "../../../lib/_module";
 import DDBEnricherData from "../data/DDBEnricherData";
 
@@ -42,9 +41,9 @@ export default class ShadowBlade extends DDBEnricherData {
 
   get activity(): IDDBActivityData {
     return {
+      targetType: "self",
       data: {
         name: "Cast",
-        targetType: "self",
         enchant: {
           self: true,
         },
@@ -146,7 +145,7 @@ export default class ShadowBlade extends DDBEnricherData {
   async importShadowBlades() {
     const updateBool = this.ddbParser?.ddbCharacter?.updateCompendiumItems
       ?? this.ddbParser?.ddbCharacter?.forceCompendiumUpdate
-      ?? game.settings.get(SETTINGS.MODULE_ID, "character-update-policy-update-add-features-to-compendiums");
+      ?? utils.getSetting<boolean>("character-update-policy-update-add-features-to-compendiums");
 
     const handler = await DDBItemImporter.buildHandler(
       "spells",

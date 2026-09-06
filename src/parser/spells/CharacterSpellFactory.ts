@@ -73,8 +73,9 @@ export default class CharacterSpellFactory {
 
     switch (type) {
       case "race": {
-        // Handles both the direct trait id and the 2024 lineage case, where the
-        // spell points at the chosen lineage option instead of the trait itself.
+        // Handles the direct trait id, the 2024 lineage case (the spell points at the
+        // chosen lineage option — resolved through `choices.race`), and upstream 7.1.22's
+        // race-OPTION case (resolved through `options.race[].componentId`).
         lookup = resolveRaceGrantingTrait(ddb, id) ?? undefined;
         break;
       }

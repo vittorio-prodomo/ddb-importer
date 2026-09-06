@@ -110,8 +110,10 @@ export function generateBackground(bg) {
     if (bg.featuresBackground) {
       result.description += `<h2>${bg.featuresBackground.name}</h2>`;
       result.description += bg.featuresBackground.shortDescription.replace("\r\n", "");
-      result.description += `<h3>${bg.featuresBackground.featureName}</h3>`;
-      result.description += bg.featuresBackground.featureDescription.replace("\r\n", "");
+      if (utils.stripHtml(bg.featuresBackground.featureDescription ?? "").trim()) {
+        result.description += `<h3>${bg.featuresBackground.featureName}</h3>`;
+        result.description += bg.featuresBackground.featureDescription.replace("\r\n", "");
+      }
       result.featuresId = bg.featuresBackground.id;
       result.id = bg.featuresBackground.id;
       result.featuresEntityTypeId = bg.featuresBackground.entityTypeId;
@@ -124,8 +126,10 @@ export function generateBackground(bg) {
     ) {
       result.description += `<h2>${bg.characteristicsBackground.name}</h2>`;
       result.description += bg.characteristicsBackground.shortDescription.replace("\r\n", "");
-      result.description += `<h3>${bg.characteristicsBackground.featureName}</h3>`;
-      result.description += bg.characteristicsBackground.featureDescription.replace("\r\n", "");
+      if (utils.stripHtml(bg.characteristicsBackground.featureDescription ?? "").trim()) {
+        result.description += `<h3>${bg.characteristicsBackground.featureName}</h3>`;
+        result.description += bg.characteristicsBackground.featureDescription.replace("\r\n", "");
+      }
       result.characteristicsId = bg.characteristicsBackground.id;
       result.characteristicsEntityTypeId = bg.characteristicsBackground.entityTypeId;
     }
@@ -134,9 +138,10 @@ export function generateBackground(bg) {
   // T215: a 2024 background names its ORIGIN FEAT here with an empty
   // featureDescription (the feat is its own item) — emitting the header then
   // left a dangling <h2> at the end of every 2024 background. Only a feature
-  // with an actual body (the 2014 shape) earns its header.
+  // with an actual body (the 2014 shape) earns its header. Upstream 7.1.30 fixed
+  // the same thing and tests the STRIPPED text, which also covers an empty-tag body.
   const backgroundFeatureDescription = (bg.featureDescription ?? "").replace("\r\n", "");
-  if (bg.featureName && backgroundFeatureDescription.trim() !== "") {
+  if (bg.featureName && utils.stripHtml(bg.featureDescription ?? "").trim()) {
     result.description += `<h2>${bg.featureName}</h2>`;
     result.description += backgroundFeatureDescription;
   }
