@@ -7,6 +7,7 @@ import TraitAdvancement from "dnd5e/dnd5e/module/documents/advancement/trait.mjs
 import type CharacterFeatureFactory from "../features/CharacterFeatureFactory";
 import { matchesGrantingFeature } from "../spells/grantedSpellRows";
 import { parseAlwaysPreparedGrants } from "./alwaysPreparedGrant";
+import { isDuplicateAdvancement } from "./advancementDedupe";
 
 function htmlToText(html) {
   // keep html brakes and tabs
@@ -2767,7 +2768,10 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
         spellGrants: [spellGrant],
         abilities: abilityData.abilities,
         hint,
-        name,
+        // T228: the cantrip grants above are titled "<Trait> (Spells)"; the levelled grants
+        // were titled with the bare trait name, so one feature read "Elven Lineage (Spells)"
+        // at level 1 and "Elven Lineage" at 3 and 5.
+        name: advancementName,
         spellLinks,
         is2024,
       });
@@ -3564,6 +3568,13 @@ Starting at 5th level, you can cast the ${lineageMatch.five} spell with this tra
     if (addToAdvancements) {
       advancements.forEach((advancement) => {
         const a = advancement.toObject();
+        // T228: upstream's species-trait generator (`_generateSpellAdvancements`) has usually
+        // already put this exact grant on a lineage trait; a second copy per spell is noise
+        // on the sheet and a double offer in the level-up flow. Same type + level + uuids = same grant.
+        if (isDuplicateAdvancement(feature.system.advancement, a)) {
+          logger.debug(`Skipping duplicate spell advancement "${a.title}" on ${feature.name}`, { advancement: a });
+          return;
+        }
         feature.system.advancement[a._id] = a;
       });
     }
