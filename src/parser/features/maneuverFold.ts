@@ -138,7 +138,19 @@ export function foldManeuversIntoParent<T extends AnyItem>(items: T[]): T[] {
   const addendum = firstAddendum([items[parentIndex], ...children.map((c) => c.item)]);
   parent.system.description = { ...(parent.system.description ?? {}), value: `${sections.join("")}${addendum}` };
   parent.flags ??= {};
-  parent.flags.ddbimporter = { ...(parent.flags.ddbimporter ?? {}), chosenManeuvers: children.map((c) => c.bare), maneuversFolded: true };
+  // Each maneuver's own icon, for the premade to dress its activities with (its pack gives most of
+  // them the same crossed swords). A placeholder is no icon.
+  const maneuverIcons: Record<string, string> = {};
+  for (const { item, bare } of children) {
+    const img = String(item?.img ?? "");
+    if (img && !(/\/svg\/|mystery-man|item-bag|feature\.svg/i).test(img)) maneuverIcons[bare] = img;
+  }
+  parent.flags.ddbimporter = {
+    ...(parent.flags.ddbimporter ?? {}),
+    chosenManeuvers: children.map((c) => c.bare),
+    maneuverIcons,
+    maneuversFolded: true,
+  };
 
   const removed = new Set(children.map((c) => c.index));
   return items.map((item, index) => (index === parentIndex ? (parent as T) : item)).filter((_, index) => !removed.has(index));
