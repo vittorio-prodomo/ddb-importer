@@ -93,3 +93,10 @@ test("foldedId: 16 characters, unique against what is taken", () => {
   assert.equal(b.length, 16);
   assert.notEqual(a, b);
 });
+
+test("fold: each maneuver's icon is stamped for the premade; a placeholder is not an icon", () => {
+  const plain = child("Riposte");
+  const placeholder = child("Goading Attack", { img: "systems/dnd5e/icons/svg/items/feature.svg" });
+  const folded = foldManeuversIntoParent([parent(), plain, placeholder])[0] as any;
+  assert.deepEqual(folded.flags.ddbimporter.maneuverIcons, { Riposte: "Riposte.webp" });
+});

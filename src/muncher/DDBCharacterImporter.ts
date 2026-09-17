@@ -369,6 +369,14 @@ export default class DDBCharacterImporter {
       }) as TAll5eItemDocuments[]; // we know these are right, as we pass in the same docs
     }
 
+    // FORK (T232): a 2024 Battle Master's chosen maneuvers are ACTIVITIES of the one "Maneuver
+    // Options" feature, not an item each — see parser/features/maneuverFold.ts. Done HERE: after
+    // every pass that expects the separate items (enrichers, consumption linking, the choice
+    // addendum) and after the ICON pass just above, so each maneuver brings its own icon with it
+    // (folded earlier they all inherited the premade's crossed swords) — and before the
+    // description wrap below, which would otherwise nest.
+    items = foldManeuversIntoParent(items);
+
     items = items.map((item) => {
       if (!item.effects) item.effects = [];
       const description = foundry.utils.getProperty(item, "system.description.value");
@@ -597,12 +605,6 @@ ${item.system.description.chat}
     logger.debug("Calculating items to create and update...");
     this.notifier("Calculating items to create and update...");
     let items = this.filterItemsByUserSelection();
-
-    // FORK (T232): a 2024 Battle Master's chosen maneuvers are ACTIVITIES of the one "Maneuver
-    // Options" feature, not an item each — see parser/features/maneuverFold.ts. Done here, on the
-    // final item list, so every earlier pass (enrichers, consumption linking, the choice addendum)
-    // has already run on the separate items the rest of the parser expects.
-    items = foldManeuversIntoParent(items);
 
     logger.debug("Checking existing items for details...");
     this.notifier("Checking existing items for details...");
