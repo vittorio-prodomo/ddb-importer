@@ -18,6 +18,7 @@ import { planEffectWipe } from "../effects/dependentEffectsPlan";
 import { createInfusedItems, linkSelectedEnchantments } from "../parser/character/infusions";
 import { setConditions } from "../parser/character/conditions";
 import { ExternalAutomations } from "../effects/_module";
+import { foldManeuversIntoParent } from "../parser/features/maneuverFold";
 
 interface IDDBCharacterImporter {
   actorId: string;
@@ -596,6 +597,12 @@ ${item.system.description.chat}
     logger.debug("Calculating items to create and update...");
     this.notifier("Calculating items to create and update...");
     let items = this.filterItemsByUserSelection();
+
+    // FORK (T232): a 2024 Battle Master's chosen maneuvers are ACTIVITIES of the one "Maneuver
+    // Options" feature, not an item each — see parser/features/maneuverFold.ts. Done here, on the
+    // final item list, so every earlier pass (enrichers, consumption linking, the choice addendum)
+    // has already run on the separate items the rest of the parser expects.
+    items = foldManeuversIntoParent(items);
 
     logger.debug("Checking existing items for details...");
     this.notifier("Checking existing items for details...");
