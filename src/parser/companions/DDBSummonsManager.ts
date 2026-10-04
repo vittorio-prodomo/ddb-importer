@@ -99,8 +99,14 @@ export default class DDBSummonsManager {
           uuid: actor.uuid,
           count: summonsKeys.find((s) => flag === s.name)?.count ?? "",
           level: summonsKeys.find((s) => flag === s.name)?.level ?? { min: null, max: null },
+          key: flag,
         };
-      });
+      })
+      // FORK (T235): the compendium index is in creation order, which put actors added to an
+      // existing summon later (Dancing Lights' Medium forms) wherever they landed. The summon
+      // prompt lists profiles as given, so present them in the order the enricher declares.
+      .sort((a, b) => keys.indexOf(a.key) - keys.indexOf(b.key))
+      .map(({ key: _key, ...profile }) => profile);
 
     const baseData = foundry.utils.mergeObject(
       foundry.utils.deepClone(DDBSummonsManager.DEFAULT_SUMMON), data);

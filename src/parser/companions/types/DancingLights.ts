@@ -1,6 +1,17 @@
 import { utils } from "../../../lib/_module";
 import { SUMMONS_ACTOR_STUB } from "./_data";
 
+// Orb colour key -> the label used in the actor name; same seven as the orbs below.
+const MEDIUM_COLOURS: Record<string, string> = {
+  Yellow: "Yellow",
+  BlueTeal: "Blue Teal",
+  Green: "Green",
+  BlueYellow: "Blue Yellow",
+  Pink: "Pink",
+  PurpleGreen: "Purple Green",
+  Red: "Red",
+};
+
 const DANCING_LIGHTS_BASE = {
   "name": "Dancing Lights",
   "img": "modules/ddb-importer/img/jb2a/DancingLights_01_Yellow_Thumb.webp",
@@ -172,6 +183,36 @@ export function getDancingLights(): ICompanionResult {
       }),
     },
   };
+
+  // FORK (T235): the 2024 spell also lets the caster "combine the four lights into one glowing
+  // Medium form that is vaguely humanlike". JB2A ships no such asset, so the fork carries its
+  // own art (procedural, tools/generate-dancing-lights-medium.py), one per orb colour. The
+  // light it sheds is the orb's own: same colour, same 10 ft of Dim Light.
+  for (const [colour, label] of Object.entries(MEDIUM_COLOURS)) {
+    const orbLight = foundry.utils.getProperty(results[`DancingLights${colour}`].data, "prototypeToken.light") as Record<string, unknown>;
+    const name = `Dancing Light, Medium (${label})`;
+    results[`DancingLightsMedium${colour}`] = {
+      name,
+      version: "1",
+      required: null,
+      isJB2A: false,
+      needsJB2A: false,
+      folderName: "Dancing Lights",
+      data: foundry.utils.mergeObject(foundry.utils.deepClone(dancingLightsBase), {
+        "name": name,
+        "system.traits.size": "med",
+        "prototypeToken.name": "Dancing Light",
+        "prototypeToken.width": 1,
+        "prototypeToken.height": 1,
+        "prototypeToken.texture.src": `modules/ddb-importer/img/dancing-lights/DancingLightsMedium_${colour}_400x400.webm`,
+        "prototypeToken.light": {
+          "color": orbLight.color,
+          "alpha": orbLight.alpha,
+        },
+        "img": `modules/ddb-importer/img/dancing-lights/DancingLightsMedium_${colour}_Thumb.webp`,
+      }),
+    };
+  }
 
   return results;
 }
