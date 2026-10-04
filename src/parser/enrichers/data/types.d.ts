@@ -35,6 +35,8 @@ global {
     name: string;
     count: number | string;
     level?: IDDBSummonProfileKeyLevel;
+    /** FORK: shown in the summon prompt instead of the actor's name. */
+    label?: string;
   }
 
   // -- Summons Configuration --------------------------------------------------

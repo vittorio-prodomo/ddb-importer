@@ -17,23 +17,14 @@ export default class DancingLights extends DDBEnricherData {
   get activity(): IDDBActivityData {
     return {
       noTemplate: true,
+      // FORK (T235 follow-up): TWO choices, as the spell reads — "up to four torch-size lights"
+      // or "one glowing Medium form that is vaguely humanlike". The COLOUR is no longer a
+      // profile (2 x 7 entries in the system's prompt): the owned module `dnd5e-summon-tethers`
+      // asks for it before this prompt and paints it onto the tokens as they are created, so
+      // the yellow actors below are only the base it recolours.
       profileKeys: [
-        { count: 4, name: "DancingLightsYellow" },
-        { count: 4, name: "DancingLightsBlueTeal" },
-        { count: 4, name: "DancingLightsGreen" },
-        { count: 4, name: "DancingLightsBlueYellow" },
-        { count: 4, name: "DancingLightsPink" },
-        { count: 4, name: "DancingLightsPurpleGreen" },
-        { count: 4, name: "DancingLightsRed" },
-        // FORK (T235): "...Alternatively, you combine the four lights into one glowing Medium
-        // form that is vaguely humanlike."
-        { count: 1, name: "DancingLightsMediumYellow" },
-        { count: 1, name: "DancingLightsMediumBlueTeal" },
-        { count: 1, name: "DancingLightsMediumGreen" },
-        { count: 1, name: "DancingLightsMediumBlueYellow" },
-        { count: 1, name: "DancingLightsMediumPink" },
-        { count: 1, name: "DancingLightsMediumPurpleGreen" },
-        { count: 1, name: "DancingLightsMediumRed" },
+        { count: 4, name: "DancingLightsYellow", label: "Dancing Lights" },
+        { count: 1, name: "DancingLightsMediumYellow", label: "Medium humanlike form" },
       ],
       summons: {
       },
