@@ -95,7 +95,7 @@ export default class DDBSummonsManager {
         const flag = foundry.utils.getProperty(actor, "flags.ddbimporter.summons.summonsKey") as string;
         return {
           _id: actor._id,
-          name: actor.name,
+          name: summonsKeys.find((s) => flag === s.name)?.label ?? actor.name,
           uuid: actor.uuid,
           count: summonsKeys.find((s) => flag === s.name)?.count ?? "",
           level: summonsKeys.find((s) => flag === s.name)?.level ?? { min: null, max: null },
