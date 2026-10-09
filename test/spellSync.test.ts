@@ -242,10 +242,13 @@ const row = (definitionId: number, over = {}) => ({
   name: `R${definitionId}`, prepared: 0, sourceItem: "class:wizard" as string | null, lookup: "classSpell" as string | null,
   ...over,
 });
-const classify = (rows: ReturnType<typeof row>[], classId: number, wholeList = false) =>
+// wholeList: `true` = the class has a full list on the sheet (a Cleric); "membership" = on
+// D&D Beyond being on the list IS being prepared (a 2024 Ranger or Paladin).
+const classify = (rows: ReturnType<typeof row>[], classId: number, wholeList: boolean | "membership" = false) =>
   classifyFoundrySpells(rows, {
     knownCasterClassIds: new Set([classId]),
     wholeListClassIds: new Set(wholeList ? [classId] : []),
+    membershipClassIds: new Set(wholeList === "membership" ? [classId] : []),
   });
 
 test("never adds a lineage or feat spell to the class, though it arrives without a class id", () => {
@@ -265,7 +268,7 @@ test("recognises a granted spell by its source item alone", () => {
   // Hunter's Mark after the Chris's Premades swap: no lookup flag left, only the source.
   const huntersMark = row(2619166, { characterClassId: null, prepared: 2, sourceItem: "feat:favored-enemy", lookup: null });
 
-  const d = diffKnownSpells(classify([huntersMark], RANGER, true), [], RANGER_OPTS);
+  const d = diffKnownSpells(classify([huntersMark], RANGER, "membership"), [], RANGER_OPTS);
 
   assert.deepEqual(d.toAdd, []);
 });
@@ -274,7 +277,7 @@ test("never adds an unprepared entry of a class that prepares from its whole lis
   // A 2024 Ranger's sheet carries the whole Ranger list; on D&D Beyond only the picks exist.
   const alarm = row(2619222, { characterClassId: RANGER, sourceItem: "class:ranger", prepared: 0 });
 
-  const d = diffKnownSpells(classify([alarm], RANGER, true), [], RANGER_OPTS);
+  const d = diffKnownSpells(classify([alarm], RANGER, "membership"), [], RANGER_OPTS);
 
   assert.deepEqual(d.toAdd, []);
 });
@@ -282,7 +285,7 @@ test("never adds an unprepared entry of a class that prepares from its whole lis
 test("adds a whole-list entry once it is prepared", () => {
   const alarm = row(2619222, { characterClassId: RANGER, sourceItem: "class:ranger", prepared: 1 });
 
-  const d = diffKnownSpells(classify([alarm], RANGER, true), [], RANGER_OPTS);
+  const d = diffKnownSpells(classify([alarm], RANGER, "membership"), [], RANGER_OPTS);
 
   assert.deepEqual(d.toAdd.map((s) => s.definitionId), [2619222]);
 });
@@ -291,7 +294,7 @@ test("never adds an always-prepared entry of a whole-list class", () => {
   // Divine Smite on a Paladin: the class-list row, promoted to always prepared by a feature.
   const smite = row(7, { characterClassId: RANGER, sourceItem: "class:ranger", prepared: 2 });
 
-  const d = diffKnownSpells(classify([smite], RANGER, true), [], RANGER_OPTS);
+  const d = diffKnownSpells(classify([smite], RANGER, "membership"), [], RANGER_OPTS);
 
   assert.deepEqual(d.toAdd, []);
 });
@@ -335,11 +338,77 @@ test("Warpey's real sheet against her real D&D Beyond list changes nothing", () 
   ];
   const onDDB = [2618847, 2619079, 2619172, 2619059].map((id) => dSpell(id, { characterClassId: RANGER }));
 
-  const d = diffKnownSpells(classify(sheet, RANGER, true), onDDB, RANGER_OPTS);
+  const d = diffKnownSpells(classify(sheet, RANGER, "membership"), onDDB, RANGER_OPTS);
 
   assert.deepEqual(d.toAdd, []);
   assert.deepEqual(d.toRemove, []);
   assert.equal(d.aborted, false);
+});
+
+// T240 — for a 2024 Ranger or Paladin, D&D Beyond holds only the picks, so unpreparing a
+// spell in Foundry has to take it off the list there. Proven on a real sheet 2026-10-09:
+// the add lands as a pick and the removal takes it away.
+const rangerRow = (definitionId: number, prepared: number) =>
+  row(definitionId, { characterClassId: RANGER, sourceItem: "class:ranger", prepared });
+const rangerPick = (definitionId: number) => dSpell(definitionId, { characterClassId: RANGER });
+
+test("unpreparing a pick removes it for a class whose list membership is preparation", () => {
+  const d = diffKnownSpells(classify([rangerRow(1, 0)], RANGER, "membership"), [rangerPick(1)], RANGER_OPTS);
+
+  assert.deepEqual(d.toRemove.map((s) => s.definitionId), [1]);
+  assert.deepEqual(d.toAdd, []);
+});
+
+test("swapping one prepared spell for another is one removal and one addition", () => {
+  const sheet = [rangerRow(1, 0), rangerRow(2, 1), rangerRow(3, 1)];
+
+  const d = diffKnownSpells(classify(sheet, RANGER, "membership"), [rangerPick(1), rangerPick(3)], RANGER_OPTS);
+
+  assert.deepEqual(d.toRemove.map((s) => s.definitionId), [1]);
+  assert.deepEqual(d.toAdd.map((s) => s.definitionId), [2]);
+});
+
+test("an always-prepared row never removes the pick behind it", () => {
+  // The player also picked a spell a feature keeps prepared anyway. Foundry shows one row,
+  // always prepared; that is not the player unpreparing it.
+  const d = diffKnownSpells(classify([rangerRow(1, 2)], RANGER, "membership"), [rangerPick(1)], RANGER_OPTS);
+
+  assert.deepEqual(d.toRemove, []);
+});
+
+test("a granted copy keeps the pick even where membership is preparation", () => {
+  const granted = row(1, { characterClassId: null, prepared: 2, sourceItem: "feat:elven-lineage", lookup: "race" });
+
+  const d = diffKnownSpells(classify([granted], RANGER, "membership"), [rangerPick(1)], RANGER_OPTS);
+
+  assert.deepEqual(d.toRemove, []);
+});
+
+test("an unprepared row still keeps its spell for a whole-list class that has a real prepared flag", () => {
+  // A Cleric's list is on the sheet too, but there D&D Beyond's own flag says what is
+  // prepared, so an unprepared row proves nothing about the list.
+  const d = diffKnownSpells(classify([rangerRow(1, 0)], RANGER, true), [rangerPick(1)], RANGER_OPTS);
+
+  assert.deepEqual(d.toRemove, []);
+});
+
+test("an unprepared spellbook spell is never removed", () => {
+  const d = diffKnownSpells(classify([row(1, { prepared: 0 })], WIZARD), [dSpell(1)], WIZARD_OPTS);
+
+  assert.deepEqual(d.toRemove, []);
+});
+
+import { membershipIsPreparation } from "../src/updater/spellSync.ts";
+
+test("list membership is preparation only for a 2024 Ranger or Paladin", () => {
+  const cls = (name: string, sourceIds: number[]) => ({ definition: { name, sources: sourceIds.map((sourceId) => ({ sourceId })) } });
+
+  assert.equal(membershipIsPreparation(cls("Ranger", [145])), true);
+  assert.equal(membershipIsPreparation(cls("Paladin", [145])), true);
+  assert.equal(membershipIsPreparation(cls("Ranger", [1])), false, "a 2014 Ranger learns its spells");
+  assert.equal(membershipIsPreparation(cls("Cleric", [145])), false);
+  assert.equal(membershipIsPreparation(cls("Wizard", [145])), false);
+  assert.equal(membershipIsPreparation(undefined), false);
 });
 
 const ddbClass = (name: string, sourceIds: number[]) => ({ definition: { name, sources: sourceIds.map((sourceId) => ({ sourceId })) } });

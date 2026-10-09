@@ -22,6 +22,12 @@ export interface FoundryKnownSpell {
    * removed. Absent means true. Set by classifyFoundrySpells.
    */
   learned?: boolean;
+  /**
+   * True for an unprepared row of a class whose list membership IS preparation on D&D
+   * Beyond (2024 Ranger, Paladin). The player has unpicked it, so this row does not keep
+   * the spell there: if D&D Beyond still lists it, it is removed. Absent means false.
+   */
+  unpicked?: boolean;
 }
 
 export interface DDBKnownSpell {
@@ -77,10 +83,12 @@ export function diffKnownSpells(
   const presentOnDDB = new Set(
     ddbSpells.filter((s) => knownCasterClassIds.has(s.characterClassId)).map(key),
   );
-  const foundryKeys = new Set(relevantFoundry.map(key));
+  // An unpicked row is on the sheet only as part of the class's full list; it does not
+  // hold the spell, so a pick D&D Beyond still lists is removed below.
+  const foundryKeys = new Set(relevantFoundry.filter((s) => !s.unpicked).map(key));
 
-  // Only a pick is ever added. Removals below still read every row: a spell that is on
-  // the sheet for any reason has not been forgotten.
+  // Only a pick is ever added. Removals below read every row except the unpicked ones: a
+  // spell that is on the sheet for any other reason has not been forgotten.
   const toAdd = relevantFoundry.filter((s) => s.learned !== false && !presentOnDDB.has(key(s)));
   const wanted = allowRemovals ? removableDDB.filter((s) => !foundryKeys.has(key(s))) : [];
 
@@ -183,6 +191,8 @@ export interface SpellClassification {
   knownCasterClassIds: Set<number>;
   /** Classes that prepare from their whole spell list — see preparesFromWholeList. */
   wholeListClassIds: Set<number>;
+  /** The whole-list classes where being on the list IS being prepared — see membershipIsPreparation. */
+  membershipClassIds?: Set<number>;
 }
 
 const GRANT_LOOKUPS = new Set(["race", "feat", "classFeature", "background", "item"]);
@@ -201,23 +211,41 @@ export function isGrantedSpellRow(row: Pick<FoundrySpellRow, "sourceItem" | "loo
 }
 
 /**
+ * Is being on this class's D&D Beyond spell list the same thing as having the spell prepared?
+ *
+ * True for a 2024 Ranger or Paladin: D&D Beyond lists only their picks and its `prepared`
+ * flag is junk for them (a Paladin with three prepared spells reports none). This is the
+ * gate CharacterSpellFactory.generateClassSpells uses to import every listed spell as
+ * prepared, so for these classes the sync runs that mapping backwards: prepared in Foundry
+ * means on the list, unprepared means off it. Proven on a real sheet 2026-10-09.
+ *
+ * ⚠️ Deliberately NOT true for every class with a full list. A Cleric's imported rows
+ * follow D&D Beyond's own flag, so an unprepared row there says nothing about the list,
+ * and reading it as "unpicked" would delete spells.
+ */
+export function membershipIsPreparation(
+  classInfo: { definition?: { name?: string; sources?: { sourceId?: number }[] } } | undefined,
+): boolean {
+  const is2014Class = (classInfo?.definition?.sources ?? [])
+    .some((s) => Number.isInteger(s.sourceId) && (s.sourceId as number) < 145);
+  return !is2014Class && ["Ranger", "Paladin"].includes(classInfo?.definition?.name ?? "");
+}
+
+/**
  * Does this class prepare from its whole spell list, so that D&D Beyond lists only the
  * spells the player picked?
  *
  * For such a class the sheet can carry the entire list as unprepared rows ("Import full
  * spell list"), and a row is a pick only while it is prepared. Two signals, either is
  * enough: the payload carries the list itself (`alwaysKnownSpells`, attached by the
- * proxy), or the class is a 2024 Ranger or Paladin — the same gate
- * CharacterSpellFactory.generateClassSpells uses to read list membership as preparation.
+ * proxy), or list membership is preparation for the class.
  */
 export function preparesFromWholeList(
   classInfo: { definition?: { name?: string; sources?: { sourceId?: number }[] } } | undefined,
   classSpells: { alwaysKnownSpells?: unknown[] | null } | undefined,
 ): boolean {
   if ((classSpells?.alwaysKnownSpells?.length ?? 0) > 0) return true;
-  const is2014Class = (classInfo?.definition?.sources ?? [])
-    .some((s) => Number.isInteger(s.sourceId) && (s.sourceId as number) < 145);
-  return !is2014Class && ["Ranger", "Paladin"].includes(classInfo?.definition?.name ?? "");
+  return membershipIsPreparation(classInfo);
 }
 
 /**
@@ -231,6 +259,7 @@ export function preparesFromWholeList(
  */
 export function classifyFoundrySpells(rows: FoundrySpellRow[], options: SpellClassification): FoundryKnownSpell[] {
   const { knownCasterClassIds, wholeListClassIds } = options;
+  const membershipClassIds = options.membershipClassIds ?? new Set<number>();
 
   const granted = new Set(rows.filter(isGrantedSpellRow));
   const attributed = attributeSpellsToClass(
@@ -247,9 +276,15 @@ export function classifyFoundrySpells(rows: FoundrySpellRow[], options: SpellCla
   return attributed
     .map((spell, i) => {
       const row = rows[i];
+      const isGranted = granted.has(row);
+      const membership = membershipClassIds.has(spell.characterClassId);
+      const wholeList = membership || wholeListClassIds.has(spell.characterClassId);
       // 1 exactly: an always-prepared row (2) was promoted by a feature, not picked.
-      const unpicked = wholeListClassIds.has(spell.characterClassId) && row.prepared !== 1;
-      return { ...spell, learned: !granted.has(row) && !unpicked };
+      const learned = !isGranted && !(wholeList && row.prepared !== 1);
+      // 0 exactly, and never a granted row: only the player unpreparing the class's own
+      // row takes the spell off the list.
+      const unpicked = membership && !isGranted && row.prepared === 0;
+      return { ...spell, learned, unpicked };
     })
     .filter((s) => s.characterClassId);
 }

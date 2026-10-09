@@ -4,7 +4,9 @@ import { isEqual } from "../../vendor/lowdash/_module.mjs";
 import { getActorConditionStates, getCondition } from "../parser/character/conditions";
 import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
-import { diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, pactSlotsUsed } from "./spellSync";
+import {
+  diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, membershipIsPreparation, pactSlotsUsed,
+} from "./spellSync";
 import { diffActionUses } from "./actionSync";
 import { diffHitDice } from "./hitDiceSync";
 import { changedCustomItems } from "./customItemSync";
@@ -585,6 +587,16 @@ async function updateDDBSpellsPrepared(actor, spells) {
   return Promise.all(promises);
 }
 
+// The classes where being on the D&D Beyond spell list IS being prepared (2024 Ranger,
+// Paladin). Their preparation is synced as list membership, by spellsKnown.
+function membershipClassIds(ddbCharacter): Set<number> {
+  return new Set<number>(
+    (ddbCharacter.source.ddb.character.classes ?? [])
+      .filter((cls) => membershipIsPreparation(cls))
+      .map((cls) => Number(cls.id)),
+  );
+}
+
 // A single sync wanting to forget more spells than this is treated as a broken diff
 // (a partial import, a half-finished CPR pass) rather than a player who really
 // unlearned that many, and the whole pass is abandoned rather than deleting from a
@@ -645,7 +657,11 @@ async function spellsKnown(actor, ddbCharacter) {
   // Spells dragged in from the DDB compendium have no characterClassId; they are attributed
   // to the class in here, and granted spells — which also have none — are kept out of the
   // additions.
-  const foundrySpells = classifyFoundrySpells(foundryRows, { knownCasterClassIds, wholeListClassIds });
+  const foundrySpells = classifyFoundrySpells(foundryRows, {
+    knownCasterClassIds,
+    wholeListClassIds,
+    membershipClassIds: membershipClassIds(ddbCharacter),
+  });
 
   const diff = diffKnownSpells(foundrySpells, ddbSpells, {
     allowRemovals,
@@ -671,8 +687,13 @@ async function spellsKnown(actor, ddbCharacter) {
 async function spellsPrepared(actor, ddbCharacter) {
   if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-spells-prepared")) return [];
   const ddbSpells = ddbCharacter.data.spells;
+  // D&D Beyond's `prepared` flag means nothing for these classes; spellsKnown adds and
+  // removes the spell instead. Sending the flag too would only fail on a spell that is
+  // not on the list yet.
+  const viaMembership = membershipClassIds(ddbCharacter);
 
   const preparedSpells = actor.items.filter((item) => {
+    if (viaMembership.has(Number(item.flags.ddbimporter?.dndbeyond?.characterClassId))) return false;
     const spellMatch = ddbSpells.find((s) =>
       s.name === item.name
       && item.system.method === "spell"
