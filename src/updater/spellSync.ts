@@ -105,6 +105,66 @@ export function diffKnownSpells(
   return { toAdd, toRemove: wanted, aborted: false };
 }
 
+/** One entry of a class's spell list on D&D Beyond. `id` is the list-mapping id an addition must carry. */
+export interface ClassListEntry {
+  id: number;
+  entityTypeId: number;
+  definitionId: number;
+  name: string;
+}
+
+/**
+ * Why an addition was not sent:
+ *  - "no-list":       the class's spell list could not be read, so any id would be a guess.
+ *  - "other-version": the list has a spell of this name, but a different one — the sheet
+ *                     holds the other edition's copy (2014 and 2024 spells share names).
+ *  - "not-on-list":   the class cannot have this spell at all.
+ */
+export type AdditionRefusal = "no-list" | "other-version" | "not-on-list";
+
+export interface ResolvedAdditions {
+  resolved: FoundryKnownSpell[];
+  refused: { spell: FoundryKnownSpell; reason: AdditionRefusal }[];
+}
+
+/**
+ * Give every addition the id it has on the character's OWN class list.
+ *
+ * ⚠️ That id is per LIST, not per spell: 2024 Alarm is 21172912 on the 2024 Wizard's
+ * list, 21172911 on the 2024 Ranger's and 21172914 on the 2014 Wizard's. The id on a
+ * Foundry item is whatever list the item came from — for a spell dragged out of the
+ * munched compendium, a 2014 class's list, which is the wrong one for every 2024
+ * character. So the item's id is never trusted for an addition; the list is asked.
+ *
+ * A spell the list does not hold is refused rather than sent on a guess. That also
+ * stops the commonest slip: the compendium has a 2014 and a 2024 copy of some 300
+ * spells under one name, and the wrong copy would put a legacy spell on the sheet.
+ */
+export function resolveAdditionIds(
+  toAdd: FoundryKnownSpell[],
+  listsByClassId: Map<number, ClassListEntry[] | null | undefined>,
+): ResolvedAdditions {
+  const out: ResolvedAdditions = { resolved: [], refused: [] };
+
+  for (const spell of toAdd) {
+    const list = listsByClassId.get(spell.characterClassId);
+    if (!list) {
+      out.refused.push({ spell, reason: "no-list" });
+      continue;
+    }
+    const entry = list.find((e) => e.definitionId === spell.definitionId);
+    if (entry) {
+      out.resolved.push({ ...spell, entryId: entry.id, entityTypeId: entry.entityTypeId ?? spell.entityTypeId });
+      continue;
+    }
+    const name = String(spell.name ?? "").trim().toLowerCase();
+    const sameName = name !== "" && list.some((e) => String(e.name ?? "").trim().toLowerCase() === name);
+    out.refused.push({ spell, reason: sameName ? "other-version" : "not-on-list" });
+  }
+
+  return out;
+}
+
 export interface SpellSyncCall {
   characterClassId: number;
   spellId: number;

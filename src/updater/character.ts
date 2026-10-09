@@ -6,7 +6,9 @@ import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
 import {
   diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, membershipIsPreparation, pactSlotsUsed,
+  resolveAdditionIds,
 } from "./spellSync";
+import type { ClassListEntry, FoundryKnownSpell, ResolvedAdditions } from "./spellSync";
 import { diffActionUses } from "./actionSync";
 import { diffHitDice } from "./hitDiceSync";
 import { changedCustomItems } from "./customItemSync";
@@ -597,6 +599,75 @@ function membershipClassIds(ddbCharacter): Set<number> {
   );
 }
 
+// One class's spell list, by its D&D Beyond class definition id. Null when it cannot be read
+// (a proxy without the route, a refused cobalt): the caller then sends no addition for it.
+async function fetchClassSpellList(actor, classDefinitionId: number): Promise<ClassListEntry[] | null> {
+  const campaignId = DDBCampaigns.getCampaignId();
+  const body = {
+    cobalt: Secrets.getCobalt(actor.id),
+    betaKey: PatreonHelper.getPatreonKey(foundry.utils.getProperty(actor, "flags.ddbimporter.useLocalPatreonKey") as boolean ?? false),
+    classId: classDefinitionId,
+    campaignId: campaignId === "" ? null : campaignId,
+  };
+  try {
+    const response = await fetch(`${DDBProxy.getProxy()}/proxy/class/spell-list`, {
+      method: "POST",
+      cache: "no-cache",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (!data?.success || !Array.isArray(data.data)) {
+      logger.warn(`Spell list for class ${classDefinitionId} unavailable: ${data?.message}`);
+      return null;
+    }
+    return data.data.map((e) => ({
+      id: e.id, entityTypeId: e.entityTypeId, definitionId: e.definition?.id, name: e.definition?.name,
+    }));
+  } catch (error) {
+    logger.warn(`Spell list for class ${classDefinitionId} unavailable:`, error);
+    return null;
+  }
+}
+
+// Additions get their id from the class's own spell list, never from the Foundry item —
+// see resolveAdditionIds. Anything the list does not hold is refused, and said out loud.
+async function resolveSpellAdditions(actor, ddbCharacter, toAdd: FoundryKnownSpell[]): Promise<ResolvedAdditions> {
+  if (toAdd.length === 0) return { resolved: [], refused: [] };
+  const ddb = ddbCharacter.source.ddb.character;
+  const lists = new Map<number, ClassListEntry[] | null>();
+
+  for (const classId of new Set(toAdd.map((s) => s.characterClassId))) {
+    const wanted = toAdd.filter((s) => s.characterClassId === classId).map((s) => s.definitionId);
+    // A whole-list class's list already came with the character.
+    const catalogue: ClassListEntry[] = ((ddb.classSpells ?? []).find((c) => c.characterClassId === classId)?.alwaysKnownSpells ?? [])
+      .filter((e) => e?.definition)
+      .map((e) => ({ id: e.id, entityTypeId: e.entityTypeId, definitionId: e.definition.id, name: e.definition.name }));
+    if (wanted.every((id) => catalogue.some((e) => e.definitionId === id))) {
+      lists.set(classId, catalogue);
+      continue;
+    }
+    const classDefinitionId = (ddb.classes ?? []).find((c) => c.id === classId)?.definition?.id;
+    const fetched = Number.isInteger(classDefinitionId) ? await fetchClassSpellList(actor, classDefinitionId) : null;
+    if (!fetched && catalogue.length === 0) lists.set(classId, null);
+    else lists.set(classId, [...catalogue, ...(fetched ?? []).filter((f) => !catalogue.some((e) => e.definitionId === f.definitionId))]);
+  }
+
+  const result = resolveAdditionIds(toAdd, lists);
+  const className = (classId: number) => (ddb.classes ?? []).find((c) => c.id === classId)?.definition?.name ?? "class";
+  for (const { spell, reason } of result.refused) {
+    const list = `${className(spell.characterClassId)} spell list`;
+    const why = {
+      "no-list": `the ${list} could not be read from the proxy`,
+      "other-version": `the ${list} has a different version of it (2014 and 2024 spells share names): replace the sheet's copy with the other one from the DDB Spells compendium`,
+      "not-on-list": `it is not on the ${list}`,
+    }[reason];
+    logger.warn(`Spell addition refused for ${actor.name}: ${spell.name} (${reason})`, { spell });
+    ui.notifications.warn(`DDB spell sync (${actor.name}): ${spell.name} was not added on D&D Beyond — ${why}.`, { permanent: true });
+  }
+  return result;
+}
+
 // A single sync wanting to forget more spells than this is treated as a broken diff
 // (a partial import, a half-finished CPR pass) rather than a player who really
 // unlearned that many, and the whole pass is abandoned rather than deleting from a
@@ -648,7 +719,8 @@ async function spellsKnown(actor, ddbCharacter) {
       characterClassId: item.flags.ddbimporter?.dndbeyond?.characterClassId ?? null,
       entityTypeId: item.flags.ddbimporter?.entityTypeId,
       entryId: item.flags.ddbimporter?.id ?? null,
-      name: item.name,
+      // The D&D Beyond name: a sheet row can be renamed or translated.
+      name: item.flags.ddbimporter?.originalName ?? item.name,
       prepared: Number(item.system?.prepared ?? 0),
       sourceItem: item.system?.sourceItem ?? null,
       lookup: item.flags.ddbimporter?.dndbeyond?.lookup ?? null,
@@ -675,8 +747,11 @@ async function spellsKnown(actor, ddbCharacter) {
     return [];
   }
 
-  const calls = buildSpellSyncCalls(diff);
-  logger.debug(`Spell sync for ${actor.name}`, { adds: diff.toAdd.length, removes: diff.toRemove.length });
+  const additions = await resolveSpellAdditions(actor, ddbCharacter, diff.toAdd);
+  const calls = buildSpellSyncCalls({ ...diff, toAdd: additions.resolved });
+  logger.debug(`Spell sync for ${actor.name}`, {
+    adds: additions.resolved.length, refused: additions.refused.length, removes: diff.toRemove.length,
+  });
 
   return Promise.all(
     calls.map((body) =>
