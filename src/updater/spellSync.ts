@@ -14,6 +14,14 @@ export interface FoundryKnownSpell {
   /** DDB entry id (flags.ddbimporter.id); absent for a spell Foundry has just gained. */
   entryId: number | null;
   name: string;
+  /**
+   * False for a row that sits on the sheet without being one of this class's own picks:
+   * a spell granted by a feat, lineage or feature, or an entry of the class's full spell
+   * list that was never prepared. Such a row is never sent as an addition, but it still
+   * counts as "the sheet has this spell", so it keeps a D&D Beyond spell from being
+   * removed. Absent means true. Set by classifyFoundrySpells.
+   */
+  learned?: boolean;
 }
 
 export interface DDBKnownSpell {
@@ -71,7 +79,9 @@ export function diffKnownSpells(
   );
   const foundryKeys = new Set(relevantFoundry.map(key));
 
-  const toAdd = relevantFoundry.filter((s) => !presentOnDDB.has(key(s)));
+  // Only a pick is ever added. Removals below still read every row: a spell that is on
+  // the sheet for any reason has not been forgotten.
+  const toAdd = relevantFoundry.filter((s) => s.learned !== false && !presentOnDDB.has(key(s)));
   const wanted = allowRemovals ? removableDDB.filter((s) => !foundryKeys.has(key(s))) : [];
 
   if (wanted.length > removalCap) {
@@ -151,6 +161,97 @@ export function attributeSpellsToClass(
     (s.characterClassId === null || s.characterClassId === undefined)
       ? { ...s, characterClassId: only }
       : s);
+}
+
+/** The parts of a Foundry spell item that decide whether it is one of a class's own picks. */
+export interface FoundrySpellRow {
+  definitionId: number | null;
+  /** flags.ddbimporter.dndbeyond.characterClassId. Null on granted spells and on spells dragged in from a compendium. */
+  characterClassId: number | null;
+  entityTypeId: number;
+  entryId: number | null;
+  name: string;
+  /** dnd5e `system.prepared`: 0 unprepared, 1 prepared, 2 always prepared. */
+  prepared: number;
+  /** dnd5e `system.sourceItem`, "<item type>:<identifier>" — "class:ranger", "feat:elven-lineage". */
+  sourceItem: string | null;
+  /** flags.ddbimporter.dndbeyond.lookup — "classSpell" on a class's own row, otherwise the kind of grant. */
+  lookup: string | null;
+}
+
+export interface SpellClassification {
+  knownCasterClassIds: Set<number>;
+  /** Classes that prepare from their whole spell list — see preparesFromWholeList. */
+  wholeListClassIds: Set<number>;
+}
+
+const GRANT_LOOKUPS = new Set(["race", "feat", "classFeature", "background", "item"]);
+
+/**
+ * A spell the character has through a feat, lineage, feature, background or item rather
+ * than by picking it for a class.
+ *
+ * ⚠️ Both tests are needed. Chris's Premades can swap a granted spell and leave it with
+ * no `lookup` at all (Hunter's Mark from Favored Enemy), and a row imported before
+ * granted spells were given a source has a `lookup` and no `sourceItem`.
+ */
+export function isGrantedSpellRow(row: Pick<FoundrySpellRow, "sourceItem" | "lookup">): boolean {
+  if (row.lookup && GRANT_LOOKUPS.has(row.lookup)) return true;
+  return Boolean(row.sourceItem) && !String(row.sourceItem).startsWith("class:");
+}
+
+/**
+ * Does this class prepare from its whole spell list, so that D&D Beyond lists only the
+ * spells the player picked?
+ *
+ * For such a class the sheet can carry the entire list as unprepared rows ("Import full
+ * spell list"), and a row is a pick only while it is prepared. Two signals, either is
+ * enough: the payload carries the list itself (`alwaysKnownSpells`, attached by the
+ * proxy), or the class is a 2024 Ranger or Paladin — the same gate
+ * CharacterSpellFactory.generateClassSpells uses to read list membership as preparation.
+ */
+export function preparesFromWholeList(
+  classInfo: { definition?: { name?: string; sources?: { sourceId?: number }[] } } | undefined,
+  classSpells: { alwaysKnownSpells?: unknown[] | null } | undefined,
+): boolean {
+  if ((classSpells?.alwaysKnownSpells?.length ?? 0) > 0) return true;
+  const is2014Class = (classInfo?.definition?.sources ?? [])
+    .some((s) => Number.isInteger(s.sourceId) && (s.sourceId as number) < 145);
+  return !is2014Class && ["Ranger", "Paladin"].includes(classInfo?.definition?.name ?? "");
+}
+
+/**
+ * Turn the sheet's spell rows into the diff's input, marking which are the class's own picks.
+ *
+ * ⚠️ The diff used to treat every row as a pick. On the first real party that meant
+ * sixteen additions nobody had learned: granted spells arrive with no class id, exactly
+ * like a spell dragged in from the compendium, so the single-class attribution handed
+ * them to the class; and a 2024 Ranger's unprepared list rows would all have become
+ * prepared spells on D&D Beyond, where being on the list IS being prepared.
+ */
+export function classifyFoundrySpells(rows: FoundrySpellRow[], options: SpellClassification): FoundryKnownSpell[] {
+  const { knownCasterClassIds, wholeListClassIds } = options;
+
+  const granted = new Set(rows.filter(isGrantedSpellRow));
+  const attributed = attributeSpellsToClass(
+    rows.map((r) => ({
+      definitionId: r.definitionId,
+      characterClassId: r.characterClassId as number,
+      entityTypeId: r.entityTypeId,
+      entryId: r.entryId,
+      name: r.name,
+    })),
+    knownCasterClassIds,
+  );
+
+  return attributed
+    .map((spell, i) => {
+      const row = rows[i];
+      // 1 exactly: an always-prepared row (2) was promoted by a feature, not picked.
+      const unpicked = wholeListClassIds.has(spell.characterClassId) && row.prepared !== 1;
+      return { ...spell, learned: !granted.has(row) && !unpicked };
+    })
+    .filter((s) => s.characterClassId);
 }
 
 /**
