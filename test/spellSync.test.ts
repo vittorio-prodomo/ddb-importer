@@ -425,3 +425,72 @@ test("a 2024 Ranger or Paladin prepares from its list even when the payload carr
   assert.equal(preparesFromWholeList(ddbClass("Paladin", [145]), {}), true);
   assert.equal(preparesFromWholeList(ddbClass("Ranger", [1]), {}), false, "a 2014 Ranger learns its spells");
 });
+
+import { resolveAdditionIds } from "../src/updater/spellSync.ts";
+
+// T241 — the id a spell addition carries must be the entry's id in the character's OWN
+// class list. Those ids differ per list: 2024 Alarm is 21172912 on the 2024 Wizard's
+// list and 21172914 on the 2014 Wizard's, which is the one a compendium copy carries.
+const WIZARD_2024_LIST = [
+  { id: 21172912, entityTypeId: 435869154, definitionId: 2619222, name: "Alarm" },
+  { id: 21171404, entityTypeId: 435869154, definitionId: 2618957, name: "Grease" },
+  { id: 138001, entityTypeId: 435869154, definitionId: 2400, name: "Snilloc's Snowball Swarm" },
+];
+const lists = (entries: typeof WIZARD_2024_LIST | null) => new Map([[WIZARD, entries]]);
+
+test("sends the class list's own id, not the one the dragged copy carries", () => {
+  const dragged = fSpell(2619222, { entryId: 21172914, name: "Alarm" });
+
+  const r = resolveAdditionIds([dragged], lists(WIZARD_2024_LIST));
+
+  assert.deepEqual(r.refused, []);
+  assert.equal(r.resolved[0].entryId, 21172912);
+  assert.equal(r.resolved[0].definitionId, 2619222);
+});
+
+test("gives an id to an addition that arrived without one", () => {
+  const r = resolveAdditionIds([fSpell(2618957, { entryId: null, name: "Grease" })], lists(WIZARD_2024_LIST));
+
+  assert.equal(r.resolved[0].entryId, 21171404);
+});
+
+test("keeps an older spell that the class list really offers", () => {
+  // A 2024 Wizard's list still holds 2014 spells that have no newer version.
+  const r = resolveAdditionIds([fSpell(2400, { entryId: 5, name: "Snilloc's Snowball Swarm" })], lists(WIZARD_2024_LIST));
+
+  assert.equal(r.resolved[0].entryId, 138001);
+});
+
+test("refuses the wrong edition's copy and says the list has another version", () => {
+  // The compendium holds a 2014 and a 2024 Grease under one name. The 2014 copy is not
+  // on a 2024 Wizard's list; sending it would put a legacy spell on the sheet.
+  const legacy = fSpell(2127, { entryId: 137998, name: "Grease" });
+
+  const r = resolveAdditionIds([legacy], lists(WIZARD_2024_LIST));
+
+  assert.deepEqual(r.resolved, []);
+  assert.equal(r.refused.length, 1);
+  assert.equal(r.refused[0].reason, "other-version");
+  assert.equal(r.refused[0].spell.definitionId, 2127);
+});
+
+test("refuses a spell that is not on the class list at all", () => {
+  const r = resolveAdditionIds([fSpell(999, { entryId: 1, name: "Cure Wounds" })], lists(WIZARD_2024_LIST));
+
+  assert.deepEqual(r.resolved, []);
+  assert.equal(r.refused[0].reason, "not-on-list");
+});
+
+test("refuses every addition for a class whose list could not be read", () => {
+  // Without the list the id would be a guess again.
+  const r = resolveAdditionIds([fSpell(2619222, { entryId: 21172914 })], lists(null));
+
+  assert.deepEqual(r.resolved, []);
+  assert.equal(r.refused[0].reason, "no-list");
+});
+
+test("matches the other version's name whatever its capitals", () => {
+  const r = resolveAdditionIds([fSpell(2127, { name: "GREASE" })], lists(WIZARD_2024_LIST));
+
+  assert.equal(r.refused[0].reason, "other-version");
+});
