@@ -228,3 +228,131 @@ test("never reports a negative consumption", () => {
 test("treats missing numbers as nothing used rather than guessing", () => {
   assert.equal(pactSlotsUsed({ max: undefined as never, value: 1 }), 0);
 });
+
+import { classifyFoundrySpells, preparesFromWholeList } from "../src/updater/spellSync.ts";
+
+// T236 — the first sync of the four real heroes wanted to ADD sixteen spells nobody had
+// learned. Every shape below is copied from those sheets (2026-10-09).
+const RANGER = 221402904;
+const RANGER_OPTS = { allowRemovals: true, removalCap: 5, knownCasterClassIds: new Set([RANGER]) };
+const WIZARD_OPTS = { allowRemovals: true, removalCap: 5, knownCasterClassIds: new Set([WIZARD]) };
+
+const row = (definitionId: number, over = {}) => ({
+  definitionId, characterClassId: WIZARD as number | null, entityTypeId: 435869154, entryId: 9000 + definitionId,
+  name: `R${definitionId}`, prepared: 0, sourceItem: "class:wizard" as string | null, lookup: "classSpell" as string | null,
+  ...over,
+});
+const classify = (rows: ReturnType<typeof row>[], classId: number, wholeList = false) =>
+  classifyFoundrySpells(rows, {
+    knownCasterClassIds: new Set([classId]),
+    wholeListClassIds: new Set(wholeList ? [classId] : []),
+  });
+
+test("never adds a lineage or feat spell to the class, though it arrives without a class id", () => {
+  // Druidcraft from Elven Lineage, Guidance from Magic Initiate: class id null, so the
+  // single-class attribution used to hand them to the Ranger / the Wizard.
+  const granted = [
+    row(2619158, { characterClassId: null, prepared: 2, sourceItem: "feat:elven-lineage", lookup: "race" }),
+    row(2618971, { characterClassId: null, prepared: 2, sourceItem: "feat:magic-initiate-cleric", lookup: "feat" }),
+  ];
+
+  const d = diffKnownSpells(classify(granted, WIZARD), [], WIZARD_OPTS);
+
+  assert.deepEqual(d.toAdd, []);
+});
+
+test("recognises a granted spell by its source item alone", () => {
+  // Hunter's Mark after the Chris's Premades swap: no lookup flag left, only the source.
+  const huntersMark = row(2619166, { characterClassId: null, prepared: 2, sourceItem: "feat:favored-enemy", lookup: null });
+
+  const d = diffKnownSpells(classify([huntersMark], RANGER, true), [], RANGER_OPTS);
+
+  assert.deepEqual(d.toAdd, []);
+});
+
+test("never adds an unprepared entry of a class that prepares from its whole list", () => {
+  // A 2024 Ranger's sheet carries the whole Ranger list; on D&D Beyond only the picks exist.
+  const alarm = row(2619222, { characterClassId: RANGER, sourceItem: "class:ranger", prepared: 0 });
+
+  const d = diffKnownSpells(classify([alarm], RANGER, true), [], RANGER_OPTS);
+
+  assert.deepEqual(d.toAdd, []);
+});
+
+test("adds a whole-list entry once it is prepared", () => {
+  const alarm = row(2619222, { characterClassId: RANGER, sourceItem: "class:ranger", prepared: 1 });
+
+  const d = diffKnownSpells(classify([alarm], RANGER, true), [], RANGER_OPTS);
+
+  assert.deepEqual(d.toAdd.map((s) => s.definitionId), [2619222]);
+});
+
+test("never adds an always-prepared entry of a whole-list class", () => {
+  // Divine Smite on a Paladin: the class-list row, promoted to always prepared by a feature.
+  const smite = row(7, { characterClassId: RANGER, sourceItem: "class:ranger", prepared: 2 });
+
+  const d = diffKnownSpells(classify([smite], RANGER, true), [], RANGER_OPTS);
+
+  assert.deepEqual(d.toAdd, []);
+});
+
+test("still adds an unprepared spell a spellbook caster has just learned", () => {
+  // Dragged from the compendium: no class id, dnd5e stamps the class as its source,
+  // and a Wizard's new spell starts unprepared. This must keep syncing.
+  const learned = row(1991, { characterClassId: null, prepared: 0, sourceItem: "class:wizard", lookup: null });
+
+  const d = diffKnownSpells(classify([learned], WIZARD), [], WIZARD_OPTS);
+
+  assert.deepEqual(d.toAdd.map((s) => s.definitionId), [1991]);
+  assert.equal(d.toAdd[0].characterClassId, WIZARD);
+});
+
+test("a row that is not a pick still keeps its D&D Beyond spell from being removed", () => {
+  // The importer can drop an unprepared class row when a lineage grants the same spell
+  // always prepared, leaving only the granted row. That is not the player forgetting it.
+  const grantedCopy = row(5, { characterClassId: null, prepared: 2, sourceItem: "feat:elven-lineage", lookup: "race" });
+  const unpickedEntry = row(6, { prepared: 0 });
+
+  const d = diffKnownSpells(classify([grantedCopy, unpickedEntry], WIZARD, true), [dSpell(5), dSpell(6)], WIZARD_OPTS);
+
+  assert.deepEqual(d.toRemove, []);
+  assert.deepEqual(d.toAdd, []);
+});
+
+test("Warpey's real sheet against her real D&D Beyond list changes nothing", () => {
+  const ranger = (definitionId: number, prepared: number) =>
+    row(definitionId, { characterClassId: RANGER, sourceItem: "class:ranger", prepared });
+  const sheet = [
+    // the four she prepared
+    ranger(2618847, 1), ranger(2619079, 1), ranger(2619172, 1), ranger(2619059, 1),
+    // the rest of the Ranger list
+    ranger(2619222, 0), ranger(2619097, 0), ranger(2619093, 0), ranger(2619186, 0),
+    ranger(2618910, 0), ranger(2618952, 0), ranger(2618975, 0), ranger(2618991, 0),
+    // Favored Enemy and Elven Lineage
+    row(2619166, { characterClassId: null, prepared: 2, sourceItem: "feat:favored-enemy", lookup: null }),
+    row(2619158, { characterClassId: null, prepared: 2, sourceItem: "feat:elven-lineage", lookup: "race" }),
+    row(2619004, { characterClassId: null, prepared: 2, sourceItem: "feat:elven-lineage", lookup: "race" }),
+  ];
+  const onDDB = [2618847, 2619079, 2619172, 2619059].map((id) => dSpell(id, { characterClassId: RANGER }));
+
+  const d = diffKnownSpells(classify(sheet, RANGER, true), onDDB, RANGER_OPTS);
+
+  assert.deepEqual(d.toAdd, []);
+  assert.deepEqual(d.toRemove, []);
+  assert.equal(d.aborted, false);
+});
+
+const ddbClass = (name: string, sourceIds: number[]) => ({ definition: { name, sources: sourceIds.map((sourceId) => ({ sourceId })) } });
+
+test("a class whose payload carries a full spell list prepares from that list", () => {
+  assert.equal(preparesFromWholeList(ddbClass("Cleric", [1]), { alwaysKnownSpells: [{}] }), true);
+  assert.equal(preparesFromWholeList(ddbClass("Wizard", [145]), { alwaysKnownSpells: [] }), false);
+  assert.equal(preparesFromWholeList(ddbClass("Wizard", [145]), {}), false);
+});
+
+test("a 2024 Ranger or Paladin prepares from its list even when the payload carries none", () => {
+  // The same gate the importer uses to read list membership as preparation.
+  assert.equal(preparesFromWholeList(ddbClass("Ranger", [145]), {}), true);
+  assert.equal(preparesFromWholeList(ddbClass("Paladin", [145]), {}), true);
+  assert.equal(preparesFromWholeList(ddbClass("Ranger", [1]), {}), false, "a 2014 Ranger learns its spells");
+});

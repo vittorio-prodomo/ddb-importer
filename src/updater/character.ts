@@ -4,7 +4,7 @@ import { isEqual } from "../../vendor/lowdash/_module.mjs";
 import { getActorConditionStates, getCondition } from "../parser/character/conditions";
 import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
-import { diffKnownSpells, buildSpellSyncCalls, attributeSpellsToClass, pactSlotsUsed } from "./spellSync";
+import { diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, pactSlotsUsed } from "./spellSync";
 import { diffActionUses } from "./actionSync";
 import { diffHitDice } from "./hitDiceSync";
 import { changedCustomItems } from "./customItemSync";
@@ -616,9 +616,20 @@ async function spellsKnown(actor, ddbCharacter) {
     })),
   );
 
+  // For a class that prepares from its whole list, the sheet holds the entire list and
+  // only a prepared row is one of the player's picks.
+  const ddbClasses = ddbCharacter.source.ddb.character.classes ?? [];
+  const wholeListClassIds = new Set<number>(
+    ddbClassSpells
+      .filter((cls) => preparesFromWholeList(ddbClasses.find((c) => c.id === cls.characterClassId), cls))
+      .map((cls) => Number(cls.characterClassId)),
+  );
+
   // Anything without a DDB definition id was never a DDB spell (hand-made, or added by
   // Chris's Premades) and must stay invisible to this diff.
-  const rawFoundrySpells = getFoundryItems(actor)
+  // ⚠️ `prepared` is read here although getFoundryItems returns SOURCE data: it is a plain
+  // stored number on a spell, not a derived value.
+  const foundryRows = getFoundryItems(actor)
     .filter((item) => item.type === "spell" && item.system?.method === "spell")
     .map((item) => ({
       definitionId: item.flags.ddbimporter?.definitionId ?? null,
@@ -626,12 +637,15 @@ async function spellsKnown(actor, ddbCharacter) {
       entityTypeId: item.flags.ddbimporter?.entityTypeId,
       entryId: item.flags.ddbimporter?.id ?? null,
       name: item.name,
+      prepared: Number(item.system?.prepared ?? 0),
+      sourceItem: item.system?.sourceItem ?? null,
+      lookup: item.flags.ddbimporter?.dndbeyond?.lookup ?? null,
     }));
 
-  // Spells dragged in from the DDB compendium have no characterClassId; attribute them
-  // BEFORE filtering, or a newly learned spell is dropped before it is ever considered.
-  const foundrySpells = attributeSpellsToClass(rawFoundrySpells, knownCasterClassIds)
-    .filter((s) => s.characterClassId);
+  // Spells dragged in from the DDB compendium have no characterClassId; they are attributed
+  // to the class in here, and granted spells — which also have none — are kept out of the
+  // additions.
+  const foundrySpells = classifyFoundrySpells(foundryRows, { knownCasterClassIds, wholeListClassIds });
 
   const diff = diffKnownSpells(foundrySpells, ddbSpells, {
     allowRemovals,
