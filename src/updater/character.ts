@@ -288,7 +288,7 @@ async function updateDDBCurrency(actor) {
 
 async function currency(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-currency")) resolve({});
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-currency")) return resolve({});
 
     const value = {
       pp: Number.isInteger(actor.system.currency.pp) ? actor.system.currency.pp : 0,
@@ -441,7 +441,7 @@ async function updateDDBExhaustion(actor) {
 
 async function exhaustion(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-condition")) resolve({});
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-condition")) return resolve({});
     const same = ddbCharacter.data.character.system.attributes.exhaustion === actor.system.attributes.exhaustion;
 
     if (!same) {
@@ -468,7 +468,7 @@ async function updateDDBCondition(actor, condition) {
 
 async function conditions(actor, ddbCharacter) {
   return new Promise((resolve) => {
-    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-condition")) resolve([]);
+    if (!game.settings.get(SETTINGS.MODULE_ID, "sync-policy-condition")) return resolve([]);
     const conditions = getActorConditionStates(actor, ddbCharacter.source.ddb);
     const results = [];
     conditions.forEach((condition) => {
