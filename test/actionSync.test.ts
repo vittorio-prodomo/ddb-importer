@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert";
 
-import { diffActionUses, diffSpellUses, grantingFeature } from "../src/updater/actionSync.ts";
+import { arcaneWardUses, diffActionUses, diffSpellUses, grantingFeature } from "../src/updater/actionSync.ts";
 
 // Identity shapes verified live 2026-08-24 on two characters:
 //   Foundry item : flags.ddbimporter.id = 10292282, entityTypeId = 12168134  (class FEATURE)
@@ -132,4 +132,40 @@ test("…and never across entity types", () => {
 
 test("an uncountable Foundry pool is never sent", () => {
   assert.deepEqual(diffSpellUses([{ ddbId: 5477280, entityTypeId: 420821570, name: "Shield", used: NaN }], [SHIELD_ENTRY, HM_ENTRY_NO_POOL_SEEN]), []);
+});
+
+// Arcane Ward (2026-10-15). CPR's ward keeps NO uses on the feature: its whole state is one Active Effect
+// ("Arcane Ward: N", flags chris-premades.arcaneWard = {hp, max}), created by the first abjuration spell of
+// the day and deleted by a long rest. D&D Beyond keeps it as TWO actions under the Arcane Ward feature
+// (Nigel's, read live): "Arcane Ward" (1/LR — created today) and "Arcane Ward: Hit Points" (used = absorbed).
+const WARD_FEATURE = { ddbId: 10292978, entityTypeId: 12168134 };
+const WARD_CREATE = { id: 9414649, entityTypeId: 222216831, componentId: 10292978, componentTypeId: 12168134, name: "Arcane Ward", numberUsed: 0 };
+const WARD_HP = { id: 9414648, entityTypeId: 222216831, componentId: 10292978, componentTypeId: 12168134, name: "Arcane Ward: Hit Points", numberUsed: 0 };
+
+test("a ward that exists marks Arcane Ward used, and its hit points as max minus what is left", () => {
+  // Asymmetric on purpose: D&D Beyond stores USED, CPR stores what REMAINS.
+  const items = arcaneWardUses(WARD_FEATURE, { hp: 4, max: 9 });
+  assert.deepEqual(diffActionUses(items, [WARD_HP, WARD_CREATE]), [
+    { actionId: 9414649, entityTypeId: 222216831, uses: 1 },
+    { actionId: 9414648, entityTypeId: 222216831, uses: 5 },
+  ]);
+});
+
+test("a full ward sends only the creation, never a hit-point change", () => {
+  assert.deepEqual(diffActionUses(arcaneWardUses(WARD_FEATURE, { hp: 9, max: 9 }), [WARD_HP, WARD_CREATE]),
+    [{ actionId: 9414649, entityTypeId: 222216831, uses: 1 }]);
+});
+
+test("no ward (a long rest deleted it) resets both", () => {
+  const spent = [{ ...WARD_HP, numberUsed: 5 }, { ...WARD_CREATE, numberUsed: 1 }];
+  assert.deepEqual(diffActionUses(arcaneWardUses(WARD_FEATURE, null), spent), [
+    { actionId: 9414649, entityTypeId: 222216831, uses: 0 },
+    { actionId: 9414648, entityTypeId: 222216831, uses: 0 },
+  ]);
+});
+
+test("no Arcane Ward feature, or an unreadable ward, sends nothing", () => {
+  assert.deepEqual(arcaneWardUses(null, { hp: 4, max: 9 }), []);
+  assert.deepEqual(diffActionUses(arcaneWardUses(WARD_FEATURE, { hp: "x" as never, max: 9 }), [WARD_HP, WARD_CREATE])
+    .map((c) => c.actionId), [9414649], "the creation still syncs; the unreadable hit points do not");
 });
