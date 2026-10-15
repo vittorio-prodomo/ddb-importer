@@ -9,9 +9,9 @@ import {
   resolveAdditionIds,
 } from "./spellSync";
 import type { ClassListEntry, FoundryKnownSpell, ResolvedAdditions } from "./spellSync";
-import { diffActionUses } from "./actionSync";
+import { diffActionUses, diffSpellUses, grantingFeature } from "./actionSync";
 import { diffHitDice } from "./hitDiceSync";
-import { changedCustomItems } from "./customItemSync";
+import { addedCustomItemDefinitionId, changedCustomItems, customItemEntryFlags, findCustomItemEntry } from "./customItemSync";
 
 const CHARACTER_CONTAINER_ENTITY_TYPE_ID = 1581111423;
 const PARTY_CONTAINER_ENTITY_TYPE_ID = DDBPartyInventory.PARTY_CONTAINER_ENTITY_TYPE_ID;
@@ -897,8 +897,24 @@ async function deleteDDBCustomItems(actor, itemsToDelete) {
  * @returns {Array} A n array of the added
  * custom items, each enriched with DDB information.
  */
+// D&D Beyond files a new custom item under an inventory entry that its answer does not name; it shows up
+// in a fresh character read, seconds later. See customItemSync.ts.
+async function readBackCustomItemEntries(actor, added) {
+  for (let attempt = 0; attempt < 5 && added.some((a) => !a.entry); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const fresh = new DDBCharacter({
+      currentActor: actor,
+      characterId: actor.flags.ddbimporter.dndbeyond.characterId,
+      selectResources: false,
+    });
+    await fresh.getCharacterData({ localCobaltPostFix: actor.id });
+    const inventory = fresh.source?.ddb?.character?.inventory;
+    for (const a of added) a.entry ??= findCustomItemEntry(inventory, a.definitionId);
+  }
+}
+
 async function addDDBCustomItems(actor, itemsToAdd) {
-  const customItemResults = [];
+  const added = [];
   for (let i = 0; i < itemsToAdd.length; i++) {
     const item = itemsToAdd[i];
     const containerEntityId = foundry.utils.hasProperty(item, "flags.ddbimporter.containerEntityId")
@@ -924,18 +940,39 @@ async function addDDBCustomItems(actor, itemsToAdd) {
     const itemData = (typeof item.toObject === "function")
       ? item.toObject()
       : foundry.utils.duplicate(item);
-    const data = await updateCharacterCall(actor, "custom/item", customData, { name: itemData.name });
-    foundry.utils.setProperty(itemData, "flags.ddbimporter.id", data.data.addItems[0].id);
+    const data: any = await updateCharacterCall(actor, "custom/item", customData, { name: itemData.name });
+    // A refused add was already reported by updateCharacterCall, and nothing landed to record.
+    if (!data?.success) continue;
+    // ⚠️ The answer is the custom item itself, not `addItems` — reading `addItems[0]` threw after
+    // the write had landed, so every re-sync added another copy.
+    const definitionId = addedCustomItemDefinitionId(data.data);
+    if (definitionId === null) {
+      logger.error(`D&D Beyond added ${itemData.name} for ${actor.name} but its answer carries no id`, data);
+      ui.notifications.error(`${itemData.name} was added to D&D Beyond, but its id could not be read: re-import ${actor.name} before syncing again.`);
+      continue;
+    }
     foundry.utils.setProperty(itemData, "flags.ddbimporter.custom", true);
     foundry.utils.setProperty(itemData, "flags.ddbimporter.ddbCustomAdded", true);
     foundry.utils.setProperty(itemData, "flags.ddbimporter.dndbeyond.isCustomItem", true);
-    foundry.utils.setProperty(itemData, "flags.ddbimporter.definitionId", data.data.addItems[0].definition.id);
-    foundry.utils.setProperty(itemData, "flags.ddbimporter.containerEntityId", data.data.addItems[0].definition.containerEntityId);
-    foundry.utils.setProperty(itemData, "flags.ddbimporter.containerEntityTypeId", data.data.addItems[0].definition.containerEntityTypeId);
-    customItemResults.push(itemData);
+    foundry.utils.setProperty(itemData, "flags.ddbimporter.definitionId", definitionId);
+    added.push({ itemData, definitionId, entry: data.data?.addItems?.[0] ?? null });
   }
 
-  return customItemResults;
+  if (added.some((a) => !a.entry)) await readBackCustomItemEntries(actor, added);
+  for (const a of added) {
+    if (a.entry) {
+      for (const [key, value] of Object.entries(customItemEntryFlags(a.entry))) {
+        foundry.utils.setProperty(a.itemData, `flags.ddbimporter.${key}`, value);
+      }
+    } else {
+      // Without the entry id the next sync's remove pass does not recognise the item and deletes it
+      // from D&D Beyond; a re-import stamps the id.
+      logger.error(`Could not read back the D&D Beyond inventory entry of ${a.itemData.name} (${actor.name})`);
+      ui.notifications.error(`${a.itemData.name} was added to D&D Beyond, but its entry could not be read back: re-import ${actor.name} before syncing again.`);
+    }
+  }
+
+  return added.map((a) => a.itemData);
 }
 
 async function addDDBEquipment(actor, itemsToAdd) {
@@ -1568,23 +1605,82 @@ async function actionUseStatus(actor, ddbCharacter) {
   // at all — the source stores only `spent`. Reading uses from it yields NaN, which is
   // how this silently synced nothing. Take identity from the source item (so
   // ignoreItemUpdate is still honoured) but read the counts off the LIVE document.
-  const foundryItems = getFoundryItems(actor)
+  const sourceItems = getFoundryItems(actor);
+  // ⚠️ Only a REAL pool counts. An inert granting feature (Favored Enemy since the dual-pool shape) has
+  // `max: ""`, and Number("") is 0, so it read as "0 used" and claimed the same D&D Beyond action as the
+  // spell that really holds the pool — resetting Warpey's Hunter's Mark to 0 used once D&D Beyond had 2.
+  const liveUsed = (item) => {
+    const live = actor.items.get(item._id);
+    const max = Number(live?.system?.uses?.max);
+    const value = Number(live?.system?.uses?.value);
+    return Number.isFinite(max) && max > 0 && Number.isFinite(value) ? Math.max(0, max - value) : NaN;
+  };
+  const featureItems = sourceItems
     .filter((item) => item.flags.ddbimporter?.action || item.type === "feat")
+    .map((item) => ({
+      ddbId: item.flags.ddbimporter?.id ?? null,
+      entityTypeId: item.flags.ddbimporter?.entityTypeId ?? null,
+      name: item.name,
+      used: liveUsed(item),
+    }));
+
+  // A free-cast pool that lives on a SPELL — the dual-pool shape (Warpey's Hunter's Mark): the pool is on
+  // the spell and the granting feature is inert, so the feature pass above never sees the casts spent.
+  // D&D Beyond keeps that pool as an action under the granting feature; send the spell's count there,
+  // matched by the spell's name as well. See actionSync.ts.
+  const features = sourceItems
+    .filter((item) => item.type === "feat")
+    .map((item) => ({
+      ddbId: item.flags.ddbimporter?.id ?? null,
+      entityTypeId: item.flags.ddbimporter?.entityTypeId ?? null,
+      name: item.name,
+      identifier: item.system?.identifier ?? "",
+    }));
+  const spellPools = sourceItems
+    .filter((item) => item.type === "spell" && item.flags.ddbimporter?.dualPoolGrant)
     .map((item) => {
-      const live = actor.items.get(item._id);
-      const max = Number(live?.system?.uses?.max);
-      const value = Number(live?.system?.uses?.value);
+      const feature = grantingFeature({
+        sourceItem: item.system?.sourceItem,
+        grantFeature: item.flags.ddbimporter.dualPoolGrant.feature,
+      }, features);
       return {
-        ddbId: item.flags.ddbimporter?.id ?? null,
-        entityTypeId: item.flags.ddbimporter?.entityTypeId ?? null,
+        ddbId: feature?.ddbId ?? null,
+        entityTypeId: feature?.entityTypeId ?? null,
         name: item.name,
-        used: Number.isFinite(max) && Number.isFinite(value) ? Math.max(0, max - value) : NaN,
+        actionName: item.name,
+        used: liveUsed(item),
       };
-    })
+    });
+
+  const foundryItems = [...featureItems, ...spellPools]
     .filter((i) => Number.isFinite(i.used));
 
-  const calls = diffActionUses(foundryItems, ddbActions);
-  logger.debug(`Action use sync for ${actor.name}`, { candidates: foundryItems.length, ddbActions: ddbActions.length, calls });
+  // The same free-cast spells, when D&D Beyond keeps the pool on the SPELL ENTRY instead (feat and species
+  // grants: Healing Word, Longstrider, Faerie Fire). Same route, the entry's own id. Item-granted spells are
+  // left out: their uses are the item's charges. See diffSpellUses.
+  const rawSpells = ddbCharacter.source.ddb.character.spells ?? {};
+  const ddbSpellEntries = [
+    ...Object.entries(rawSpells).filter(([origin]) => origin !== "item").flatMap(([, list]) => (list as any[]) ?? []),
+    ...(ddbCharacter.source.ddb.character.classSpells ?? []).flatMap((cs: any) => cs.spells ?? []),
+  ]
+    .filter((sp: any) => sp?.limitedUse)
+    .map((sp: any) => ({
+      id: Number(sp.id),
+      entityTypeId: Number(sp.entityTypeId),
+      name: sp.definition?.name,
+      numberUsed: Number(sp.limitedUse.numberUsed ?? 0),
+    }));
+  const spellRows = sourceItems
+    .filter((item) => item.type === "spell" && item.flags.ddbimporter?.dualPoolGrant)
+    .map((item) => ({
+      ddbId: item.flags.ddbimporter?.id ?? null,
+      entityTypeId: item.flags.ddbimporter?.entityTypeId ?? null,
+      name: item.name,
+      used: liveUsed(item),
+    }));
+
+  const calls = [...diffActionUses(foundryItems, ddbActions), ...diffSpellUses(spellRows, ddbSpellEntries)];
+  logger.debug(`Action use sync for ${actor.name}`, { candidates: foundryItems.length, ddbActions: ddbActions.length, spellRows: spellRows.length, ddbSpellEntries: ddbSpellEntries.length, calls });
 
   return Promise.all(
     calls.map((body) => updateCharacterCall(actor, "action/use", body, `Action uses for ${actor.name}`)),
