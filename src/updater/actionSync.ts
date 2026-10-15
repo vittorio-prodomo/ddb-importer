@@ -133,3 +133,29 @@ export function diffSpellUses(
   }
   return calls;
 }
+
+/**
+ * Arcane Ward. CPR's ward keeps NO uses on the feature (2026-07-15 redesign): its whole state is one Active
+ * Effect on the actor — "Arcane Ward: N", `flags.chris-premades.arcaneWard = {hp, max}` — created by the
+ * first abjuration spell of the day and deleted by a long rest. D&D Beyond keeps it as TWO actions under
+ * the Arcane Ward feature: "Arcane Ward" (1/LR: created today) and "Arcane Ward: Hit Points" (used =
+ * absorbed). ⚠️ Polarity: D&D Beyond stores USED, CPR stores what REMAINS. Both are matched by name, so
+ * neither can be written to the other's action.
+ * @param feature the Arcane Ward feature's D&D Beyond identity, or null when the actor has none
+ * @param ward the ward effect's `{hp, max}`, or null when no ward exists
+ */
+export function arcaneWardUses(
+  feature: { ddbId: number | null; entityTypeId: number | null } | null,
+  ward: { hp: number; max: number } | null,
+): FoundryUsesItem[] {
+  if (!feature) return [];
+  const hp = Number(ward?.hp);
+  const max = Number(ward?.max);
+  const absorbed = ward
+    ? (Number.isFinite(hp) && Number.isFinite(max) ? Math.max(0, max - hp) : NaN)
+    : 0;
+  return [
+    { ...feature, name: "Arcane Ward", actionName: "Arcane Ward", used: ward ? 1 : 0 },
+    { ...feature, name: "Arcane Ward: Hit Points", actionName: "Arcane Ward: Hit Points", used: absorbed },
+  ];
+}

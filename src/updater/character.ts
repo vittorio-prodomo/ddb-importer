@@ -9,7 +9,7 @@ import {
   resolveAdditionIds,
 } from "./spellSync";
 import type { ClassListEntry, FoundryKnownSpell, ResolvedAdditions } from "./spellSync";
-import { diffActionUses, diffSpellUses, grantingFeature } from "./actionSync";
+import { arcaneWardUses, diffActionUses, diffSpellUses, grantingFeature } from "./actionSync";
 import { diffHitDice } from "./hitDiceSync";
 import { addedCustomItemDefinitionId, changedCustomItems, customItemEntryFlags, findCustomItemEntry } from "./customItemSync";
 
@@ -1652,7 +1652,16 @@ async function actionUseStatus(actor, ddbCharacter) {
       };
     });
 
-  const foundryItems = [...featureItems, ...spellPools]
+  // Arcane Ward: CPR keeps the ward on an Active Effect, not on the feature's uses. See arcaneWardUses.
+  const wardFeature = sourceItems.find((item) => item.type === "feat"
+    && (foundry.utils.getProperty(item, "flags.chris-premades.info.identifier") === "arcaneWard" || item.name === "Arcane Ward"));
+  const wardEffect = actor.effects.find((e) => foundry.utils.getProperty(e, "flags.chris-premades.info.identifier") === "arcaneWard");
+  const wardItems = arcaneWardUses(
+    wardFeature ? { ddbId: wardFeature.flags.ddbimporter?.id ?? null, entityTypeId: wardFeature.flags.ddbimporter?.entityTypeId ?? null } : null,
+    wardEffect ? (foundry.utils.getProperty(wardEffect, "flags.chris-premades.arcaneWard") as { hp: number; max: number } ?? { hp: NaN, max: NaN }) : null,
+  );
+
+  const foundryItems = [...featureItems, ...spellPools, ...wardItems]
     .filter((i) => Number.isFinite(i.used));
 
   // The same free-cast spells, when D&D Beyond keeps the pool on the SPELL ENTRY instead (feat and species
