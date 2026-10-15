@@ -48,3 +48,44 @@ export function changedCustomItems(
       || item.weight != match.weight;
   });
 }
+
+/**
+ * Adding a NEW custom item.
+ *
+ * ⚠️ D&D Beyond answers `custom/item` NEW with the custom item ITSELF (`{id, name, …}`, the id being
+ * the definition id), not with `{addItems: [...]}` as `equipment/add` does. The module read
+ * `addItems[0].id`, threw AFTER the write had landed, and so every re-sync added another copy
+ * (Nigel's "Spell Scroll of Misty Step", 2026-10-15). The `addItems` shape is still accepted.
+ *
+ * The inventory ENTRY D&D Beyond files the new item under is not in the answer at all; it appears
+ * in a fresh character read (seconds later — reads lag writes). An import stamps both ids, and the
+ * entry id is what the next sync's remove pass matches on, so the add must find it too.
+ */
+export interface DDBInventoryEntry {
+  id: number;
+  entityTypeId: number;
+  containerEntityId: number;
+  containerEntityTypeId: number;
+  definition: { id: number; entityTypeId: number; isCustomItem?: boolean };
+}
+
+export function addedCustomItemDefinitionId(answer: any): number | null {
+  const id = answer?.addItems?.[0]?.definition?.id ?? answer?.id;
+  return Number.isInteger(id) ? id : null;
+}
+
+export function findCustomItemEntry(inventory: DDBInventoryEntry[] | undefined, definitionId: number): DDBInventoryEntry | null {
+  return (inventory ?? []).find((entry) =>
+    entry.definition?.isCustomItem === true && entry.definition.id === definitionId) ?? null;
+}
+
+export function customItemEntryFlags(entry: DDBInventoryEntry) {
+  return {
+    id: entry.id,
+    entityTypeId: entry.entityTypeId,
+    definitionId: entry.definition.id,
+    definitionEntityTypeId: entry.definition.entityTypeId,
+    containerEntityId: entry.containerEntityId,
+    containerEntityTypeId: entry.containerEntityTypeId,
+  };
+}

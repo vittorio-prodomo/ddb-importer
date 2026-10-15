@@ -19,3 +19,11 @@ test("a switched-off sync category leaves the function, it does not merely settl
   const fallThrough = guards.filter(({ text }) => !/"\)\) return\b/.test(text));
   assert.deepEqual(fallThrough.map(({ n, text }) => `${n}: ${text.trim()}`), []);
 });
+
+// An inert granting feature has `uses.max: ""`; Number("") is 0, so without a `max > 0` test it counted
+// as "0 used" and fought the spell that really holds the pool for the same D&D Beyond action (2026-10-15,
+// Warpey's Hunter's Mark would have been reset to 0 used). The updater needs Foundry, so pin the shape.
+test("the action-use pass only counts a pool whose max is above zero", () => {
+  const body = source.slice(source.indexOf("async function actionUseStatus"), source.indexOf("\n}\n", source.indexOf("async function actionUseStatus")));
+  assert.match(body, /Number\.isFinite\(max\) && max > 0 &&/);
+});

@@ -26,6 +26,39 @@ export interface FoundryUsesItem {
   name: string;
   /** Uses CONSUMED (max - value), which is what DDB stores. */
   used: number;
+  /**
+   * Set for a free-cast pool that lives on a SPELL (the dual-pool shape): the D&D Beyond action must then
+   * also carry this name, so a feature with several actions never has the wrong one written.
+   */
+  actionName?: string;
+}
+
+/** Loose name equality: D&D Beyond writes "Hunter’s Mark" with a curly apostrophe, Foundry "Hunter's Mark". */
+function sameName(a: string, b: string): boolean {
+  const norm = (s: string) => `${s ?? ""}`.replace(/[\u2018\u2019]/g, "'").trim().toLowerCase();
+  return norm(a) === norm(b);
+}
+
+export interface FoundryFeature {
+  ddbId: number | null;
+  entityTypeId: number | null;
+  name: string;
+  identifier: string;
+}
+
+/**
+ * The feature that grants a dual-pool spell its free casts. A dual-pool spell's sheet subtitle already
+ * points at it through `system.sourceItem` ("feat:favored-enemy", T210); the dual-pool stamp's recorded
+ * feature NAME is the fallback.
+ */
+export function grantingFeature(
+  spell: { sourceItem: string | null | undefined; grantFeature: string | null | undefined },
+  features: FoundryFeature[],
+): FoundryFeature | null {
+  const identifier = `${spell.sourceItem ?? ""}`.match(/^feat:(.+)$/)?.[1];
+  return (identifier ? features.find((f) => f.identifier === identifier) : undefined)
+    ?? (spell.grantFeature ? features.find((f) => sameName(f.name, spell.grantFeature)) : undefined)
+    ?? null;
 }
 
 export interface DDBRawAction {
@@ -58,7 +91,8 @@ export function diffActionUses(
 
     const action = ddbActions.find((a) =>
       a.componentId === item.ddbId
-      && a.componentTypeId === item.entityTypeId);
+      && a.componentTypeId === item.entityTypeId
+      && (item.actionName === undefined || sameName(a.name, item.actionName)));
     if (!action) continue;
 
     if (Number(item.used) === Number(action.numberUsed)) continue;
@@ -66,5 +100,36 @@ export function diffActionUses(
     calls.push({ actionId: action.id, entityTypeId: action.entityTypeId, uses: Number(item.used) });
   }
 
+  return calls;
+}
+
+export interface DDBSpellEntry {
+  /** The character's spell entry (mapping) id — what `action/limited-use` takes as `id` for a spell. */
+  id: number;
+  entityTypeId: number;
+  name: string;
+  numberUsed: number;
+}
+
+/**
+ * A free-cast pool D&D Beyond keeps on the SPELL ENTRY itself (feat and species grants: Healing Word,
+ * Longstrider, Faerie Fire, Shield). D&D Beyond's own sheet writes it through `action/limited-use`, the same
+ * route as an action's uses, with the spell entry's id and entityTypeId — read from its app bundle
+ * 2026-10-15, where spellUseSet and actionUseSet share one API function. The Foundry spell already carries
+ * that entry identity in flags.ddbimporter.id / entityTypeId, so the match is direct.
+ * `ddbEntries` must hold only entries that HAVE a limitedUse: a spell whose pool D&D Beyond keeps as an
+ * action (Hunter's Mark) has none on its entry, and so is never written here as well.
+ */
+export function diffSpellUses(
+  foundrySpells: FoundryUsesItem[],
+  ddbEntries: DDBSpellEntry[],
+): ActionUseCall[] {
+  const calls: ActionUseCall[] = [];
+  for (const spell of foundrySpells) {
+    if (!Number.isFinite(Number(spell.used))) continue;
+    const entry = ddbEntries.find((e) => e.id === spell.ddbId && e.entityTypeId === spell.entityTypeId);
+    if (!entry || Number(spell.used) === Number(entry.numberUsed)) continue;
+    calls.push({ actionId: entry.id, entityTypeId: entry.entityTypeId, uses: Number(spell.used) });
+  }
   return calls;
 }
