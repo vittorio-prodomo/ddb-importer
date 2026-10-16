@@ -1811,6 +1811,8 @@ async function _updateDDBCharacter(actor) {
 }
 
 export async function updateDDBCharacter(actor) {
+  // T140: a sync-back can split a non-stackable stack on the Foundry side — housekeeping, not play.
+  await Hooks.callAll("ddb-importer.characterSyncStart", { actor });
   try {
     CONFIG.DDBI.ignoreEnrichedImages = true;
     CONFIG.DDBI.keyPostfix = actor.id;
@@ -1827,6 +1829,7 @@ export async function updateDDBCharacter(actor) {
     delete CONFIG.DDBI.ignoreEnrichedImages;
     delete CONFIG.DDBI.keyPostfix;
     delete CONFIG.DDBI.useLocal;
+    await Hooks.callAll("ddb-importer.characterSyncEnd", { actor });
   }
 }
 

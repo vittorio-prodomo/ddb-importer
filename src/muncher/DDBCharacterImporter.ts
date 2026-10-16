@@ -977,6 +977,7 @@ ${item.system.description.chat}
   }
 
   async processCharacterData() {
+    await Hooks.callAll("ddb-importer.characterProcessDataStart", { actor: this.actor });
     this.getSettings();
     if (!CONFIG.DDBI.EFFECT_CONFIG.MODULES.configured) {
       CONFIG.DDBI.EFFECT_CONFIG.MODULES.configured = await DDBMacros.configureDependencies();
@@ -1149,6 +1150,7 @@ ${item.system.description.chat}
       await this.ddbCharacter.updateDynamicUpdates(activeUpdateState);
       await this.restoreMidiQolConfig();
       this.actor.render();
+      await Hooks.callAll("ddb-importer.characterProcessDataEnd", { actor: this.actor });
       if (CONFIG.DDBI.DEV.downloadFinalActorJSON) {
         FileHelper.download(JSON.stringify(this.actor._source), `${this.actor.name}-${this.actor.id}.json`, "application/json");
       }
