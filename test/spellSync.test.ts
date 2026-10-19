@@ -591,3 +591,25 @@ test("a 2024 copy, or one that does not say, is matched on a 2024 class's list",
     assert.strictEqual(out.spells[0].definitionId, 2618957);
   }
 });
+
+// ⚠️ A spell matched by name is stamped with its definition but not with D&D Beyond's ENTRY id (the add's
+// answer does not carry it). The prepared-state sync must take the entry id from D&D Beyond's own row, and
+// never send `id: undefined` (review I3, 2026-10-19).
+import { spellPrepareInfo } from "../src/updater/spellSync.ts";
+
+const prepSpell = (id?: number) => ({
+  system: { prepared: 1 },
+  flags: { ddbimporter: { definitionId: 2618957, entityTypeId: 435869154, ...(id ? { id } : {}), dndbeyond: { characterClassId: WIZARD } } },
+});
+
+test("the prepare call uses the item's own entry id when it has one", () => {
+  assert.deepStrictEqual(spellPrepareInfo(prepSpell(555), 777, 1), { spellId: 2618957, characterClassId: WIZARD, entityTypeId: 435869154, id: 555, prepared: true });
+});
+
+test("a stamped spell without an entry id takes D&D Beyond's row's id", () => {
+  assert.strictEqual(spellPrepareInfo(prepSpell(), 777, 1)?.id, 777);
+});
+
+test("with no entry id anywhere, no prepare call is built", () => {
+  assert.strictEqual(spellPrepareInfo(prepSpell(), undefined, 1), null);
+});

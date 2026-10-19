@@ -435,3 +435,27 @@ export function pactSlotsUsed(pact: { max: number; value: number }): number {
   if (!Number.isFinite(max) || !Number.isFinite(value)) return 0;
   return Math.max(0, max - value);
 }
+
+/**
+ * The `spell/prepare` payload for a spell, or null when no D&D Beyond ENTRY id is known.
+ *
+ * ⚠️ A spell matched by name (resolveDefinitionsByName) is stamped with its definition, not its entry
+ * id — D&D Beyond's answer to the addition does not carry it. The entry id then comes from D&D Beyond's
+ * own row for the spell (`ddbEntryId`); with neither, nothing is sent rather than `id: undefined`.
+ */
+export function spellPrepareInfo(
+  spell: { system?: { prepared?: number }; flags?: { ddbimporter?: { definitionId?: number; entityTypeId?: number; id?: number; dndbeyond?: { characterClassId?: number } } } },
+  ddbEntryId: number | null | undefined,
+  preparedValue: number,
+): { spellId: number; characterClassId: number; entityTypeId: number; id: number; prepared: boolean } | null {
+  const flags = spell.flags?.ddbimporter;
+  const id = flags?.id ?? ddbEntryId;
+  if (id === null || id === undefined) return null;
+  return {
+    spellId: flags?.definitionId as number,
+    characterClassId: flags?.dndbeyond?.characterClassId as number,
+    entityTypeId: flags?.entityTypeId as number,
+    id,
+    prepared: spell.system?.prepared === preparedValue,
+  };
+}

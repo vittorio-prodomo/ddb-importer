@@ -5,7 +5,7 @@ import { getActorConditionStates, getCondition } from "../parser/character/condi
 import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
 import {
-  diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, membershipIsPreparation, pactSlotsUsed, resolveDefinitionsByName, classRulesEdition,
+  diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, membershipIsPreparation, pactSlotsUsed, resolveDefinitionsByName, classRulesEdition, spellPrepareInfo,
   resolveAdditionIds,
 } from "./spellSync";
 import type { ClassListEntry, FoundryKnownSpell, ResolvedAdditions } from "./spellSync";
@@ -565,7 +565,9 @@ async function updateSpellsPrepared(actor, spellPreparedData) {
   });
 }
 
-async function updateDDBSpellsPrepared(actor, spells) {
+// `ddbEntryIds`: item id → D&D Beyond's entry id for the spell, for a spell matched by name that carries
+// none of its own — see spellPrepareInfo.
+async function updateDDBSpellsPrepared(actor, spells, ddbEntryIds = new Map<string, number>()) {
   const promises = [];
 
   const preparedSpells = spells.filter((spell) =>
@@ -575,18 +577,14 @@ async function updateDDBSpellsPrepared(actor, spells) {
     && spell.flags.ddbimporter?.dndbeyond?.characterClassId
     && !spell.flags.ddbimporter.dndbeyond.granted,
   ).map((spell) => {
-    const spellPreparedData = {
-      spellInfo: {
-        spellId: spell.flags.ddbimporter.definitionId,
-        characterClassId: spell.flags.ddbimporter.dndbeyond.characterClassId,
-        entityTypeId: spell.flags.ddbimporter.entityTypeId,
-        id: spell.flags.ddbimporter.id,
-        prepared: spell.system.prepared === CONFIG.DND5E.spellPreparationStates.prepared.value,
-      },
-    };
-    logger.debug(`Updating spell prepared state for ${spell.name} to ${spellPreparedData.spellInfo.prepared}`);
-    return spellPreparedData;
-  });
+    const spellInfo = spellPrepareInfo(spell, ddbEntryIds.get(spell.id ?? spell._id), CONFIG.DND5E.spellPreparationStates.prepared.value);
+    if (!spellInfo) {
+      logger.warn(`Spell prepared state not synced for ${spell.name}: no D&D Beyond entry id`);
+      return null;
+    }
+    logger.debug(`Updating spell prepared state for ${spell.name} to ${spellInfo.prepared}`);
+    return { spellInfo };
+  }).filter((data) => data !== null);
 
   preparedSpells.forEach((spellPreparedData) => {
     promises.push(updateSpellsPrepared(actor, spellPreparedData));
@@ -828,6 +826,7 @@ async function spellsPrepared(actor, ddbCharacter) {
   // removes the spell instead. Sending the flag too would only fail on a spell that is
   // not on the list yet.
   const viaMembership = membershipClassIds(ddbCharacter);
+  const ddbEntryIds = new Map<string, number>();
 
   const preparedSpells = actor.items.filter((item) => {
     if (viaMembership.has(Number(item.flags.ddbimporter?.dndbeyond?.characterClassId))) return false;
@@ -842,10 +841,11 @@ async function spellsPrepared(actor, ddbCharacter) {
     const select = item.type === "spell"
       && item.system.method === "spell"
       && item.system.prepared !== spellMatch.system.prepared;
+    if (select && spellMatch.flags.ddbimporter?.id) ddbEntryIds.set(item.id, spellMatch.flags.ddbimporter.id);
     return spellMatch && select;
   });
 
-  const results = updateDDBSpellsPrepared(actor, preparedSpells);
+  const results = updateDDBSpellsPrepared(actor, preparedSpells, ddbEntryIds);
 
   return results;
 }
