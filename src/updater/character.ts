@@ -12,6 +12,7 @@ import type { ClassListEntry, FoundryKnownSpell, ResolvedAdditions } from "./spe
 import { arcaneWardUses, diffActionUses, diffSpellUses, grantingFeature } from "./actionSync";
 import { diffHitDice } from "./hitDiceSync";
 import { addedCustomItemDefinitionId, changedCustomItems, customItemEntryFlags, findCustomItemEntry } from "./customItemSync";
+import { runInSequence } from "./sequence";
 
 const CHARACTER_CONTAINER_ENTITY_TYPE_ID = 1581111423;
 const PARTY_CONTAINER_ENTITY_TYPE_ID = DDBPartyInventory.PARTY_CONTAINER_ENTITY_TYPE_ID;
@@ -1286,7 +1287,8 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
   const itemsToMove = updateItemDetails.itemsToMove || [];
   const currencyItems = updateItemDetails.itemsToCurrency || [];
 
-  const promises = [];
+  // ⚠️ One at a time: D&D Beyond lost simultaneous equipment writes (2026-10-19) — see runInSequence.
+  const promises: (() => Promise<any>)[] = [];
 
   itemsToMove.forEach((item) => {
     const characterId = parseInt(actor.flags.ddbimporter.dndbeyond.characterId);
@@ -1300,16 +1302,16 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
       containerEntityId: item.flags.ddbimporter.containerEntityId,
       containerEntityTypeId: containerEntityTypeId,
     };
-    promises.push(updateCharacterCall(actor, "equipment/move", itemData, { name: item.name }));
+    promises.push(() => updateCharacterCall(actor, "equipment/move", itemData, { name: item.name }));
   });
   itemsToEquip.forEach((item) => {
     const itemData = { itemId: item.flags.ddbimporter.id, value: item.system.equipped };
-    promises.push(updateCharacterCall(actor, "equipment/equipped", itemData, { name: item.name }));
+    promises.push(() => updateCharacterCall(actor, "equipment/equipped", itemData, { name: item.name }));
   });
   itemsToAttune.forEach((item) => {
     // console.warn(item)
     const itemData = { itemId: item.flags.ddbimporter.id, value: item.system.attuned };
-    promises.push(updateCharacterCall(actor, "equipment/attuned", itemData, { name: item.name }));
+    promises.push(() => updateCharacterCall(actor, "equipment/attuned", itemData, { name: item.name }));
   });
   itemsToCharge.forEach((rawItem) => {
     const item = actor.items.get(rawItem._id);
@@ -1318,7 +1320,7 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
       charges: Math.max(0, parseInt(item.system.uses.max) - parseInt(item.system.uses.value)),
     };
     if (Number.isInteger(itemData.charges)) {
-      promises.push(updateCharacterCall(actor, "equipment/charges", itemData, { name: item.name }));
+      promises.push(() => updateCharacterCall(actor, "equipment/charges", itemData, { name: item.name }));
     }
   });
   itemsToQuantity.forEach((item) => {
@@ -1326,7 +1328,7 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
       itemId: item.flags.ddbimporter.id,
       quantity: parseInt(item.system.quantity),
     };
-    promises.push(updateCharacterCall(actor, "equipment/quantity", itemData, { name: item.name }));
+    promises.push(() => updateCharacterCall(actor, "equipment/quantity", itemData, { name: item.name }));
   });
   itemsToName.forEach((item) => {
     // historically items may not have this metadata
@@ -1346,7 +1348,7 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
       },
     };
     const flavor = { detail: "Updating Name", name: item.name, originalName: item.flags?.ddbimporter?.originalName };
-    promises.push(updateCharacterCall(actor, "equipment/custom", customData, flavor));
+    promises.push(() => updateCharacterCall(actor, "equipment/custom", customData, flavor));
   });
 
   for (const item of currencyItems) {
@@ -1366,7 +1368,7 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
           destinationEntityTypeId: item.flags.ddbimporter.entityTypeId,
         };
         const type = DICTIONARY.currency[t];
-        promises.push(updateCharacterCall(actor, `currency/individual`, { type, currency }, `Currency - ${t}`));
+        promises.push(() => updateCharacterCall(actor, `currency/individual`, { type, currency }, `Currency - ${t}`));
       }
     });
   }
@@ -1401,10 +1403,10 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
           quantity: parseInt(item.system.quantity),
         },
       };
-      promises.push(updateCharacterCall(actor, "custom/item", customData, "Updating Custom Item"));
+      promises.push(() => updateCharacterCall(actor, "custom/item", customData, "Updating Custom Item"));
     });
 
-  return Promise.all(promises);
+  return runInSequence(promises);
 }
 
 
