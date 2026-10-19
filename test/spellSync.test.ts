@@ -565,3 +565,29 @@ test("classifyFoundrySpells carries the Foundry item id through", () => {
   const out = classifyFoundrySpells(rows, { knownCasterClassIds: new Set([WIZARD]), wholeListClassIds: new Set() });
   assert.strictEqual(out[0].itemId, "abc123");
 });
+
+// ⚠️ Name alone is not enough: a 2014 copy of Grease is called "Grease" too. The row's rules
+// edition must be the class's (a 2014 class reads a D&D Beyond source id below 145).
+import { classRulesEdition } from "../src/updater/spellSync.ts";
+
+test("a class whose D&D Beyond source is a 2014 book is a 2014 class", () => {
+  assert.strictEqual(classRulesEdition({ definition: { sources: [{ sourceId: 1 }] } }), "2014");
+  assert.strictEqual(classRulesEdition({ definition: { sources: [{ sourceId: 145 }] } }), "2024");
+  assert.strictEqual(classRulesEdition(undefined), "2024");
+});
+
+test("a 2014 copy is not matched on a 2024 class's list, and is reported as the other edition", () => {
+  const spell = fSpell(null as any, { name: "Grease", rules: "2014" });
+  const out = resolveDefinitionsByName([spell], WIZ_LIST, new Map([[WIZARD, "2024"]]));
+  assert.strictEqual(out.spells[0].definitionId, null);
+  assert.deepStrictEqual(out.wrongEdition, [spell]);
+  assert.deepStrictEqual(out.unmatched, []);
+});
+
+test("a 2024 copy, or one that does not say, is matched on a 2024 class's list", () => {
+  const editions = new Map([[WIZARD, "2024" as const]]);
+  for (const rules of ["2024", undefined]) {
+    const out = resolveDefinitionsByName([fSpell(null as any, { name: "Grease", rules })], WIZ_LIST, editions);
+    assert.strictEqual(out.spells[0].definitionId, 2618957);
+  }
+});
