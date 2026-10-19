@@ -5,13 +5,15 @@ import { getActorConditionStates, getCondition } from "../parser/character/condi
 import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
 import {
-  diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, membershipIsPreparation, pactSlotsUsed,
+  diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, membershipIsPreparation, pactSlotsUsed, resolveDefinitionsByName, classRulesEdition,
   resolveAdditionIds,
 } from "./spellSync";
 import type { ClassListEntry, FoundryKnownSpell, ResolvedAdditions } from "./spellSync";
 import { arcaneWardUses, diffActionUses, diffSpellUses, grantingFeature } from "./actionSync";
 import { diffHitDice } from "./hitDiceSync";
 import { addedCustomItemDefinitionId, changedCustomItems, customItemEntryFlags, findCustomItemEntry } from "./customItemSync";
+import { runInSequence } from "./sequence";
+import { entriesInEdition, itemRulesEdition } from "./itemEdition";
 
 const CHARACTER_CONTAINER_ENTITY_TYPE_ID = 1581111423;
 const PARTY_CONTAINER_ENTITY_TYPE_ID = DDBPartyInventory.PARTY_CONTAINER_ENTITY_TYPE_ID;
@@ -112,6 +114,7 @@ async function getUpdateItemIndex() {
     "type",
     "flags.ddbimporter.definitionId",
     "flags.ddbimporter.definitionEntityTypeId",
+    "system.source.rules",
   ];
   const itemIndex = await compendium.getIndex({ fields: indexFields });
   foundry.utils.setProperty(CONFIG, "DDBI.update.itemIndex", itemIndex);
@@ -119,10 +122,13 @@ async function getUpdateItemIndex() {
   return itemIndex;
 }
 
+// Same name AND same rules edition first — see itemEdition.ts; the whole index only when the
+// item's edition has no match there.
 async function getCompendiumItemInfo(item) {
   const index = await getUpdateItemIndex();
-  const match = NameMatcher.looseItemNameMatch(item, index, true, false, true);
-  return match;
+  const edition = itemRulesEdition(item, game.settings.get("dnd5e", "rulesVersion" as never) as unknown as string);
+  return NameMatcher.looseItemNameMatch(item, entriesInEdition(Array.from(index as any[]), edition), true, false, true)
+    ?? NameMatcher.looseItemNameMatch(item, index, true, false, true);
 }
 
 // flavor is just useful for debugging
@@ -632,18 +638,19 @@ async function fetchClassSpellList(actor, classDefinitionId: number): Promise<Cl
 
 // Additions get their id from the class's own spell list, never from the Foundry item —
 // see resolveAdditionIds. Anything the list does not hold is refused, and said out loud.
-async function resolveSpellAdditions(actor, ddbCharacter, toAdd: FoundryKnownSpell[]): Promise<ResolvedAdditions> {
-  if (toAdd.length === 0) return { resolved: [], refused: [] };
+// Each class's own spell list: the one that came with the character (a whole-list class), the proxy's
+// when `wantedByClass` names ids that one does not hold, null when neither can be read.
+async function loadClassSpellLists(actor, ddbCharacter, classIds: Iterable<number>, wantedByClass?: Map<number, number[]>): Promise<Map<number, ClassListEntry[] | null>> {
   const ddb = ddbCharacter.source.ddb.character;
   const lists = new Map<number, ClassListEntry[] | null>();
 
-  for (const classId of new Set(toAdd.map((s) => s.characterClassId))) {
-    const wanted = toAdd.filter((s) => s.characterClassId === classId).map((s) => s.definitionId);
+  for (const classId of new Set(classIds)) {
+    const wanted = wantedByClass?.get(classId);
     // A whole-list class's list already came with the character.
     const catalogue: ClassListEntry[] = ((ddb.classSpells ?? []).find((c) => c.characterClassId === classId)?.alwaysKnownSpells ?? [])
       .filter((e) => e?.definition)
       .map((e) => ({ id: e.id, entityTypeId: e.entityTypeId, definitionId: e.definition.id, name: e.definition.name }));
-    if (wanted.every((id) => catalogue.some((e) => e.definitionId === id))) {
+    if (wanted && wanted.every((id) => catalogue.some((e) => e.definitionId === id))) {
       lists.set(classId, catalogue);
       continue;
     }
@@ -652,11 +659,23 @@ async function resolveSpellAdditions(actor, ddbCharacter, toAdd: FoundryKnownSpe
     if (!fetched && catalogue.length === 0) lists.set(classId, null);
     else lists.set(classId, [...catalogue, ...(fetched ?? []).filter((f) => !catalogue.some((e) => e.definitionId === f.definitionId))]);
   }
+  return lists;
+}
+
+const spellClassName = (ddbCharacter, classId: number) =>
+  (ddbCharacter.source.ddb.character.classes ?? []).find((c) => c.id === classId)?.definition?.name ?? "class";
+
+// Additions get their id from the class's own spell list, never from the Foundry item —
+// see resolveAdditionIds. Anything the list does not hold is refused, and said out loud.
+async function resolveSpellAdditions(actor, ddbCharacter, toAdd: FoundryKnownSpell[]): Promise<ResolvedAdditions> {
+  if (toAdd.length === 0) return { resolved: [], refused: [] };
+  const wantedByClass = new Map<number, number[]>();
+  for (const s of toAdd) wantedByClass.set(s.characterClassId, [...(wantedByClass.get(s.characterClassId) ?? []), s.definitionId as number]);
+  const lists = await loadClassSpellLists(actor, ddbCharacter, wantedByClass.keys(), wantedByClass);
 
   const result = resolveAdditionIds(toAdd, lists);
-  const className = (classId: number) => (ddb.classes ?? []).find((c) => c.id === classId)?.definition?.name ?? "class";
   for (const { spell, reason } of result.refused) {
-    const list = `${className(spell.characterClassId)} spell list`;
+    const list = `${spellClassName(ddbCharacter, spell.characterClassId)} spell list`;
     const why = {
       "no-list": `the ${list} could not be read from the proxy`,
       "other-version": `the ${list} has a different version of it (2014 and 2024 spells share names): replace the sheet's copy with the other one from the DDB Spells compendium`,
@@ -724,16 +743,43 @@ async function spellsKnown(actor, ddbCharacter) {
       prepared: Number(item.system?.prepared ?? 0),
       sourceItem: item.system?.sourceItem ?? null,
       lookup: item.flags.ddbimporter?.dndbeyond?.lookup ?? null,
+      itemId: item._id,
+      rules: item.system?.source?.rules ?? null,
     }));
 
   // Spells dragged in from the DDB compendium have no characterClassId; they are attributed
   // to the class in here, and granted spells — which also have none — are kept out of the
   // additions.
-  const foundrySpells = classifyFoundrySpells(foundryRows, {
+  const classified = classifyFoundrySpells(foundryRows, {
     knownCasterClassIds,
     wholeListClassIds,
     membershipClassIds: membershipClassIds(ddbCharacter),
   });
+
+  // A spell from another compendium (Player's Handbook, dnd5e's SRD, CPR) has no D&D Beyond id:
+  // it is matched by name on its class's own list — see resolveDefinitionsByName.
+  const namelessClassIds = classified
+    .filter((s) => (s.definitionId === null || s.definitionId === undefined) && knownCasterClassIds.has(s.characterClassId))
+    .map((s) => s.characterClassId);
+  let foundrySpells = classified;
+  if (namelessClassIds.length) {
+    const lists = await loadClassSpellLists(actor, ddbCharacter, namelessClassIds);
+    const editions = new Map(namelessClassIds.map((id) => [id, classRulesEdition((ddbCharacter.source.ddb.character.classes ?? []).find((c) => c.id === id))]));
+    const byName = resolveDefinitionsByName(classified, lists, editions);
+    foundrySpells = byName.spells;
+    for (const spell of byName.wrongEdition.filter((s) => s.learned !== false && !s.unpicked)) {
+      logger.warn(`Spell addition refused for ${actor.name}: ${spell.name} (other edition)`, { spell });
+      ui.notifications.warn(`DDB spell sync (${actor.name}): ${spell.name} was not added on D&D Beyond — the ${spellClassName(ddbCharacter, spell.characterClassId)} spell list has a different version of it (2014 and 2024 spells share names): replace the sheet's copy with the ${editions.get(spell.characterClassId)} one.`, { permanent: true });
+    }
+    // Only a pick would have been an addition; a granted or unpicked row is not worth a warning.
+    for (const spell of byName.unmatched.filter((s) => s.learned !== false && !s.unpicked && knownCasterClassIds.has(s.characterClassId))) {
+      const why = lists.get(spell.characterClassId)
+        ? `it is not on the ${spellClassName(ddbCharacter, spell.characterClassId)} spell list there`
+        : `the ${spellClassName(ddbCharacter, spell.characterClassId)} spell list could not be read from the proxy`;
+      logger.warn(`Spell addition refused for ${actor.name}: ${spell.name} (not matched by name)`, { spell });
+      ui.notifications.warn(`DDB spell sync (${actor.name}): ${spell.name} was not added on D&D Beyond — ${why}.`, { permanent: true });
+    }
+  }
 
   const diff = diffKnownSpells(foundrySpells, ddbSpells, {
     allowRemovals,
@@ -753,10 +799,26 @@ async function spellsKnown(actor, ddbCharacter) {
     adds: additions.resolved.length, refused: additions.refused.length, removes: diff.toRemove.length,
   });
 
-  return Promise.all(
+  const answers = await Promise.all(
     calls.map((body) =>
       updateCharacterCall(actor, "spells", body, `Spell ${body.remove ? "forgotten" : "learned"}`)),
   );
+
+  // A spell matched by name keeps its D&D Beyond ids once added, so the next sync knows it.
+  const stamps = calls.flatMap((body, i) => {
+    if (body.remove || (answers[i] as { success?: boolean })?.success !== true) return [];
+    const spell = additions.resolved.find((s) => s.matchedByName && s.itemId
+      && s.definitionId === body.spellId && s.characterClassId === body.characterClassId);
+    return spell ? [{
+      "_id": spell.itemId,
+      "flags.ddbimporter.definitionId": spell.definitionId,
+      "flags.ddbimporter.entityTypeId": spell.entityTypeId,
+      "flags.ddbimporter.dndbeyond.characterClassId": spell.characterClassId,
+    }] : [];
+  });
+  if (stamps.length) await actor.updateEmbeddedDocuments("Item", stamps);
+
+  return answers;
 }
 
 async function spellsPrepared(actor, ddbCharacter) {
@@ -1286,7 +1348,8 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
   const itemsToMove = updateItemDetails.itemsToMove || [];
   const currencyItems = updateItemDetails.itemsToCurrency || [];
 
-  const promises = [];
+  // ⚠️ One at a time: D&D Beyond lost simultaneous equipment writes (2026-10-19) — see runInSequence.
+  const promises: (() => Promise<any>)[] = [];
 
   itemsToMove.forEach((item) => {
     const characterId = parseInt(actor.flags.ddbimporter.dndbeyond.characterId);
@@ -1300,16 +1363,16 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
       containerEntityId: item.flags.ddbimporter.containerEntityId,
       containerEntityTypeId: containerEntityTypeId,
     };
-    promises.push(updateCharacterCall(actor, "equipment/move", itemData, { name: item.name }));
+    promises.push(() => updateCharacterCall(actor, "equipment/move", itemData, { name: item.name }));
   });
   itemsToEquip.forEach((item) => {
     const itemData = { itemId: item.flags.ddbimporter.id, value: item.system.equipped };
-    promises.push(updateCharacterCall(actor, "equipment/equipped", itemData, { name: item.name }));
+    promises.push(() => updateCharacterCall(actor, "equipment/equipped", itemData, { name: item.name }));
   });
   itemsToAttune.forEach((item) => {
     // console.warn(item)
     const itemData = { itemId: item.flags.ddbimporter.id, value: item.system.attuned };
-    promises.push(updateCharacterCall(actor, "equipment/attuned", itemData, { name: item.name }));
+    promises.push(() => updateCharacterCall(actor, "equipment/attuned", itemData, { name: item.name }));
   });
   itemsToCharge.forEach((rawItem) => {
     const item = actor.items.get(rawItem._id);
@@ -1318,7 +1381,7 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
       charges: Math.max(0, parseInt(item.system.uses.max) - parseInt(item.system.uses.value)),
     };
     if (Number.isInteger(itemData.charges)) {
-      promises.push(updateCharacterCall(actor, "equipment/charges", itemData, { name: item.name }));
+      promises.push(() => updateCharacterCall(actor, "equipment/charges", itemData, { name: item.name }));
     }
   });
   itemsToQuantity.forEach((item) => {
@@ -1326,7 +1389,7 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
       itemId: item.flags.ddbimporter.id,
       quantity: parseInt(item.system.quantity),
     };
-    promises.push(updateCharacterCall(actor, "equipment/quantity", itemData, { name: item.name }));
+    promises.push(() => updateCharacterCall(actor, "equipment/quantity", itemData, { name: item.name }));
   });
   itemsToName.forEach((item) => {
     // historically items may not have this metadata
@@ -1346,7 +1409,7 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
       },
     };
     const flavor = { detail: "Updating Name", name: item.name, originalName: item.flags?.ddbimporter?.originalName };
-    promises.push(updateCharacterCall(actor, "equipment/custom", customData, flavor));
+    promises.push(() => updateCharacterCall(actor, "equipment/custom", customData, flavor));
   });
 
   for (const item of currencyItems) {
@@ -1366,7 +1429,7 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
           destinationEntityTypeId: item.flags.ddbimporter.entityTypeId,
         };
         const type = DICTIONARY.currency[t];
-        promises.push(updateCharacterCall(actor, `currency/individual`, { type, currency }, `Currency - ${t}`));
+        promises.push(() => updateCharacterCall(actor, `currency/individual`, { type, currency }, `Currency - ${t}`));
       }
     });
   }
@@ -1401,10 +1464,10 @@ async function updateDDBEquipmentStatus(actor, updateItemDetails, ddbItems) {
           quantity: parseInt(item.system.quantity),
         },
       };
-      promises.push(updateCharacterCall(actor, "custom/item", customData, "Updating Custom Item"));
+      promises.push(() => updateCharacterCall(actor, "custom/item", customData, "Updating Custom Item"));
     });
 
-  return Promise.all(promises);
+  return runInSequence(promises);
 }
 
 

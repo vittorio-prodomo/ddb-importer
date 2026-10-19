@@ -28,6 +28,12 @@ export interface FoundryKnownSpell {
    * the spell there: if D&D Beyond still lists it, it is removed. Absent means false.
    */
   unpicked?: boolean;
+  /** The Foundry item's id, so a spell matched by name can be given its D&D Beyond ids after the sync. */
+  itemId?: string;
+  /** True when `definitionId` came from the class's spell list by NAME, not from the item — see resolveDefinitionsByName. */
+  matchedByName?: boolean;
+  /** The item's `system.source.rules` ("2014" / "2024"), when it says. */
+  rules?: string | null;
 }
 
 export interface DDBKnownSpell {
@@ -86,11 +92,20 @@ export function diffKnownSpells(
   // An unpicked row is on the sheet only as part of the class's full list; it does not
   // hold the spell, so a pick D&D Beyond still lists is removed below.
   const foundryKeys = new Set(relevantFoundry.filter((s) => !s.unpicked).map(key));
+  // ⚠️ A row with no D&D Beyond id (a copy from another compendium the class list could not
+  // name) still holds the spell: a same-named D&D Beyond spell of that class is not removed.
+  const namelessKeys = new Set(
+    foundrySpells
+      .filter((s) => (s.definitionId === null || s.definitionId === undefined) && knownCasterClassIds.has(s.characterClassId))
+      .map((s) => `${s.characterClassId}:${normalizeSpellName(s.name)}`),
+  );
 
   // Only a pick is ever added. Removals below read every row except the unpicked ones: a
   // spell that is on the sheet for any other reason has not been forgotten.
   const toAdd = relevantFoundry.filter((s) => s.learned !== false && !presentOnDDB.has(key(s)));
-  const wanted = allowRemovals ? removableDDB.filter((s) => !foundryKeys.has(key(s))) : [];
+  const wanted = allowRemovals
+    ? removableDDB.filter((s) => !foundryKeys.has(key(s)) && !namelessKeys.has(`${s.characterClassId}:${normalizeSpellName(s.name)}`))
+    : [];
 
   if (wanted.length > removalCap) {
     return {
@@ -163,6 +178,47 @@ export function resolveAdditionIds(
   }
 
   return out;
+}
+
+/** A spell name as D&D Beyond and Foundry can both spell it: trimmed, lower case, one kind of apostrophe. */
+export function normalizeSpellName(name: string | null | undefined): string {
+  return String(name ?? "").trim().toLowerCase().replace(/[\u2018\u2019]/g, "'");
+}
+
+/**
+ * Give a spell with no D&D Beyond id the definition its class's own list has under the same name.
+ *
+ * ⚠️ A spell from the Player's Handbook, dnd5e's 2024 SRD or CPR carries no ddbimporter flags, so
+ * the sync dropped it without a word: no call, no warning (dry runs on Nahuel, 2026-10-19). The
+ * class's list holds one edition only, so a name match there cannot pick the other edition's spell.
+ * A spell the list does not name — or with no list, or no class — comes back in `unmatched`.
+ */
+export function resolveDefinitionsByName(
+  spells: FoundryKnownSpell[],
+  listsByClassId: Map<number, ClassListEntry[] | null | undefined>,
+  editionByClassId = new Map<number, "2014" | "2024">(),
+): { spells: FoundryKnownSpell[]; unmatched: FoundryKnownSpell[]; wrongEdition: FoundryKnownSpell[] } {
+  const unmatched: FoundryKnownSpell[] = [];
+  const wrongEdition: FoundryKnownSpell[] = [];
+  const out = spells.map((spell) => {
+    if (spell.definitionId !== null && spell.definitionId !== undefined) return spell;
+    // ⚠️ Name alone is not enough: the 2014 copy of a spell has the same name. A row that says
+    // its edition must be the class's; one that does not say is taken as the class's.
+    const edition = spell.characterClassId ? editionByClassId.get(spell.characterClassId) : undefined;
+    if (edition && (spell.rules === "2014" || spell.rules === "2024") && spell.rules !== edition) {
+      wrongEdition.push(spell);
+      return spell;
+    }
+    const list = spell.characterClassId ? listsByClassId.get(spell.characterClassId) : null;
+    const name = normalizeSpellName(spell.name);
+    const entry = list && name ? list.find((e) => normalizeSpellName(e.name) === name) : undefined;
+    if (!entry) {
+      unmatched.push(spell);
+      return spell;
+    }
+    return { ...spell, definitionId: entry.definitionId, entityTypeId: entry.entityTypeId ?? spell.entityTypeId, matchedByName: true };
+  });
+  return { spells: out, unmatched, wrongEdition };
 }
 
 export interface SpellSyncCall {
@@ -245,6 +301,10 @@ export interface FoundrySpellRow {
   sourceItem: string | null;
   /** flags.ddbimporter.dndbeyond.lookup — "classSpell" on a class's own row, otherwise the kind of grant. */
   lookup: string | null;
+  /** The Foundry item's id. */
+  itemId?: string;
+  /** The item's `system.source.rules`. */
+  rules?: string | null;
 }
 
 export interface SpellClassification {
@@ -286,9 +346,16 @@ export function isGrantedSpellRow(row: Pick<FoundrySpellRow, "sourceItem" | "loo
 export function membershipIsPreparation(
   classInfo: { definition?: { name?: string; sources?: { sourceId?: number }[] } } | undefined,
 ): boolean {
-  const is2014Class = (classInfo?.definition?.sources ?? [])
+  return classRulesEdition(classInfo) === "2024" && ["Ranger", "Paladin"].includes(classInfo?.definition?.name ?? "");
+}
+
+/** A class's rules edition on D&D Beyond: a source id below 145 is a 2014 book. */
+export function classRulesEdition(
+  classInfo: { definition?: { sources?: { sourceId?: number }[] } } | undefined,
+): "2014" | "2024" {
+  const is2014 = (classInfo?.definition?.sources ?? [])
     .some((s) => Number.isInteger(s.sourceId) && (s.sourceId as number) < 145);
-  return !is2014Class && ["Ranger", "Paladin"].includes(classInfo?.definition?.name ?? "");
+  return is2014 ? "2014" : "2024";
 }
 
 /**
@@ -329,6 +396,8 @@ export function classifyFoundrySpells(rows: FoundrySpellRow[], options: SpellCla
       entityTypeId: r.entityTypeId,
       entryId: r.entryId,
       name: r.name,
+      itemId: r.itemId,
+      rules: r.rules,
     })),
     knownCasterClassIds,
   );
