@@ -494,3 +494,74 @@ test("matches the other version's name whatever its capitals", () => {
 
   assert.equal(r.refused[0].reason, "other-version");
 });
+
+// ── T128: a spell from a non-DDB compendium (Player's Handbook, dnd5e's 2024 SRD, CPR) carries no
+// D&D Beyond id, so the sync never sent it — no call, no warning (dry runs, 2026-10-19). It is now
+// matched by NAME on the class's own spell list, which holds one edition only.
+import { normalizeSpellName, resolveDefinitionsByName } from "../src/updater/spellSync.ts";
+
+const WIZ_LIST = new Map([[WIZARD, [
+  { id: 21171404, entityTypeId: 435869154, definitionId: 2618957, name: "Grease" },
+  { id: 21171500, entityTypeId: 435869154, definitionId: 2619000, name: "Hunter's Mark" },
+]]]);
+
+test("a Player's Handbook copy of Grease is given the class list's definition", () => {
+  const out = resolveDefinitionsByName([fSpell(null as any, { name: "Grease" })], WIZ_LIST);
+  assert.strictEqual(out.spells[0].definitionId, 2618957);
+  assert.strictEqual(out.spells[0].matchedByName, true);
+  assert.deepStrictEqual(out.unmatched, []);
+});
+
+test("an apostrophe spelled either way still matches", () => {
+  assert.strictEqual(normalizeSpellName("  Hunter’s Mark "), "hunter's mark");
+  const out = resolveDefinitionsByName([fSpell(null as any, { name: "Hunter’s Mark" })], WIZ_LIST);
+  assert.strictEqual(out.spells[0].definitionId, 2619000);
+});
+
+test("a name the class list does not hold stays unmatched", () => {
+  const spell = fSpell(null as any, { name: "Zzz Test Spell" });
+  const out = resolveDefinitionsByName([spell], WIZ_LIST);
+  assert.strictEqual(out.spells[0].definitionId, null);
+  assert.deepStrictEqual(out.unmatched, [spell]);
+});
+
+test("no readable list leaves the spell unmatched", () => {
+  const spell = fSpell(null as any, { name: "Grease" });
+  const out = resolveDefinitionsByName([spell], new Map([[WIZARD, null]]));
+  assert.strictEqual(out.spells[0].definitionId, null);
+  assert.deepStrictEqual(out.unmatched, [spell]);
+});
+
+test("a spell that already has a D&D Beyond id is left alone", () => {
+  const spell = fSpell(42, { name: "Grease" });
+  const out = resolveDefinitionsByName([spell], WIZ_LIST);
+  assert.deepStrictEqual(out.spells, [spell]);
+  assert.deepStrictEqual(out.unmatched, []);
+});
+
+test("a spell no class can be given is never matched", () => {
+  const spell = fSpell(null as any, { name: "Grease", characterClassId: undefined });
+  const out = resolveDefinitionsByName([spell], WIZ_LIST);
+  assert.strictEqual(out.spells[0].definitionId, null);
+  assert.deepStrictEqual(out.unmatched, [spell]);
+});
+
+test("a definition-less row of the same class keeps a same-named D&D Beyond spell from being removed", () => {
+  const diff = diffKnownSpells([fSpell(null as any, { name: "Grease" })], [dSpell(2618957, { name: "Grease" })], OPTS);
+  assert.deepStrictEqual(diff.toRemove, []);
+});
+
+test("…but only for its own class", () => {
+  const diff = diffKnownSpells(
+    [fSpell(null as any, { name: "Grease", characterClassId: SORCERER })],
+    [dSpell(2618957, { name: "Grease" })],
+    OPTS,
+  );
+  assert.deepStrictEqual(diff.toRemove.map((s) => s.definitionId), [2618957]);
+});
+
+test("classifyFoundrySpells carries the Foundry item id through", () => {
+  const rows = [{ definitionId: null, characterClassId: WIZARD, entityTypeId: 1, entryId: null, name: "Grease", prepared: 0, sourceItem: "class:wizard", lookup: null, itemId: "abc123" }];
+  const out = classifyFoundrySpells(rows, { knownCasterClassIds: new Set([WIZARD]), wholeListClassIds: new Set() });
+  assert.strictEqual(out[0].itemId, "abc123");
+});
