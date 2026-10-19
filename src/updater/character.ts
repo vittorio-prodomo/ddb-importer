@@ -13,6 +13,7 @@ import { arcaneWardUses, diffActionUses, diffSpellUses, grantingFeature } from "
 import { diffHitDice } from "./hitDiceSync";
 import { addedCustomItemDefinitionId, changedCustomItems, customItemEntryFlags, findCustomItemEntry } from "./customItemSync";
 import { runInSequence } from "./sequence";
+import { entriesInEdition, itemRulesEdition } from "./itemEdition";
 
 const CHARACTER_CONTAINER_ENTITY_TYPE_ID = 1581111423;
 const PARTY_CONTAINER_ENTITY_TYPE_ID = DDBPartyInventory.PARTY_CONTAINER_ENTITY_TYPE_ID;
@@ -113,6 +114,7 @@ async function getUpdateItemIndex() {
     "type",
     "flags.ddbimporter.definitionId",
     "flags.ddbimporter.definitionEntityTypeId",
+    "system.source.rules",
   ];
   const itemIndex = await compendium.getIndex({ fields: indexFields });
   foundry.utils.setProperty(CONFIG, "DDBI.update.itemIndex", itemIndex);
@@ -120,10 +122,13 @@ async function getUpdateItemIndex() {
   return itemIndex;
 }
 
+// Same name AND same rules edition first — see itemEdition.ts; the whole index only when the
+// item's edition has no match there.
 async function getCompendiumItemInfo(item) {
   const index = await getUpdateItemIndex();
-  const match = NameMatcher.looseItemNameMatch(item, index, true, false, true);
-  return match;
+  const edition = itemRulesEdition(item, game.settings.get("dnd5e", "rulesVersion" as never) as unknown as string);
+  return NameMatcher.looseItemNameMatch(item, entriesInEdition(Array.from(index as any[]), edition), true, false, true)
+    ?? NameMatcher.looseItemNameMatch(item, index, true, false, true);
 }
 
 // flavor is just useful for debugging
