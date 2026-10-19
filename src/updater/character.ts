@@ -6,6 +6,7 @@ import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
 import {
   diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, membershipIsPreparation, pactSlotsUsed, resolveDefinitionsByName, listEntryEdition, spellPrepareInfo,
+  unattributablePicks, normalizeSpellName,
   resolveAdditionIds,
 } from "./spellSync";
 import type { ClassListEntry, FoundryKnownSpell, ResolvedAdditions } from "./spellSync";
@@ -749,11 +750,25 @@ async function spellsKnown(actor, ddbCharacter) {
   // Spells dragged in from the DDB compendium have no characterClassId; they are attributed
   // to the class in here, and granted spells — which also have none — are kept out of the
   // additions.
-  const classified = classifyFoundrySpells(foundryRows, {
+  // dnd5e stamps a dropped spell `sourceItem: "class:<identifier>"`; D&D Beyond's class name slugs to it.
+  const classIdByIdentifier = new Map<string, number>(ddbClasses
+    .filter((c) => c?.definition?.name)
+    .map((c) => [String(c.definition.name).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-"), Number(c.id)]));
+  const classification = {
     knownCasterClassIds,
     wholeListClassIds,
     membershipClassIds: membershipClassIds(ddbCharacter),
-  });
+    classIdByIdentifier,
+  };
+  const classified = classifyFoundrySpells(foundryRows, classification);
+
+  // A pick no class can be found for cannot be added; say so, and let no removal take its name.
+  const unattributable = unattributablePicks(foundryRows, classification);
+  for (const row of unattributable) {
+    logger.warn(`Spell addition refused for ${actor.name}: ${row.name} (no class)`, { row });
+    ui.notifications.warn(`DDB spell sync (${actor.name}): ${row.name} was not added on D&D Beyond — it cannot tell which of the character's classes learned it.`, { permanent: true });
+  }
+  const protectedNames = new Set(unattributable.map((row) => normalizeSpellName(row.name)));
 
   // A spell from another compendium (Player's Handbook, dnd5e's SRD, CPR) has no D&D Beyond id:
   // it is matched by name on its class's own list — see resolveDefinitionsByName.
@@ -783,6 +798,7 @@ async function spellsKnown(actor, ddbCharacter) {
     allowRemovals,
     removalCap: SPELL_REMOVAL_CAP,
     knownCasterClassIds,
+    protectedNames,
   });
 
   if (diff.aborted) {

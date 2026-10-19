@@ -630,3 +630,26 @@ test("a stamped spell without an entry id takes D&D Beyond's row's id", () => {
 test("with no entry id anywhere, no prepare call is built", () => {
   assert.strictEqual(spellPrepareInfo(prepSpell(), undefined, 1), null);
 });
+
+// ⚠️ On a multiclass sheet a spell from another compendium has no class id, and the single-class
+// attribution cannot give it one — it used to be dropped before the diff: never sent, never warned
+// about, and unable to keep a same-named D&D Beyond spell from being removed (review I2).
+import { unattributablePicks } from "../src/updater/spellSync.ts";
+
+const dropRow = (over = {}) => ({ definitionId: null, characterClassId: null, entityTypeId: 1, entryId: null, name: "Grease", prepared: 0, sourceItem: "class:wizard", lookup: null, ...over });
+const MULTI = { knownCasterClassIds: new Set([WIZARD, SORCERER]), wholeListClassIds: new Set<number>() };
+
+test("on a multiclass sheet, a dropped spell is given the class dnd5e stamped on it", () => {
+  const out = classifyFoundrySpells([dropRow()], { ...MULTI, classIdByIdentifier: new Map([["wizard", WIZARD], ["sorcerer", SORCERER]]) });
+  assert.strictEqual(out[0]?.characterClassId, WIZARD);
+});
+
+test("a pick no class can be found for is reported", () => {
+  const rows = [dropRow({ sourceItem: null }), dropRow({ name: "Shield", sourceItem: "feat:magic-initiate" }), dropRow({ name: "Bless", definitionId: 5 })];
+  assert.deepStrictEqual(unattributablePicks(rows, { ...MULTI, classIdByIdentifier: new Map([["wizard", WIZARD]]) }).map((r) => r.name), ["Grease"]);
+});
+
+test("a protected name keeps a D&D Beyond spell of ANY class from being removed", () => {
+  const diff = diffKnownSpells([], [dSpell(2618957, { name: "Grease" }), dSpell(3, { name: "Sleep", characterClassId: SORCERER })], { ...OPTS, protectedNames: new Set(["grease"]) });
+  assert.deepStrictEqual(diff.toRemove.map((s) => s.name), ["Sleep"]);
+});

@@ -52,6 +52,11 @@ export interface SpellDiffOptions {
   removalCap: number;
   /** Classes that actually learn spells. A prepared caster knows its whole list already. */
   knownCasterClassIds: Set<number>;
+  /**
+   * Normalised names no removal may take, in any class: picks on the sheet that no class could be found
+   * for (see unattributablePicks). Absent = none.
+   */
+  protectedNames?: Set<string>;
 }
 
 export interface SpellDiff {
@@ -104,7 +109,9 @@ export function diffKnownSpells(
   // spell that is on the sheet for any other reason has not been forgotten.
   const toAdd = relevantFoundry.filter((s) => s.learned !== false && !presentOnDDB.has(key(s)));
   const wanted = allowRemovals
-    ? removableDDB.filter((s) => !foundryKeys.has(key(s)) && !namelessKeys.has(`${s.characterClassId}:${normalizeSpellName(s.name)}`))
+    ? removableDDB.filter((s) => !foundryKeys.has(key(s))
+      && !namelessKeys.has(`${s.characterClassId}:${normalizeSpellName(s.name)}`)
+      && !options.protectedNames?.has(normalizeSpellName(s.name)))
     : [];
 
   if (wanted.length > removalCap) {
@@ -332,6 +339,32 @@ export interface SpellClassification {
   wholeListClassIds: Set<number>;
   /** The whole-list classes where being on the list IS being prepared — see membershipIsPreparation. */
   membershipClassIds?: Set<number>;
+  /**
+   * D&D Beyond class id by dnd5e class identifier ("wizard"), so a spell dnd5e stamped with
+   * `sourceItem: "class:wizard"` is given that class even on a multiclass sheet. Absent = none.
+   */
+  classIdByIdentifier?: Map<string, number>;
+}
+
+/** The class a row belongs to: its own, else the one its `class:<identifier>` sourceItem names. */
+function rowClassId(row: FoundrySpellRow, classIdByIdentifier?: Map<string, number>): number | null {
+  if (row.characterClassId) return row.characterClassId;
+  const match = (/^class:(.+)$/).exec(row.sourceItem ?? "");
+  return (match && classIdByIdentifier?.get(match[1] as string)) ?? null;
+}
+
+/**
+ * Picks on the sheet with no D&D Beyond id that no class can be found for — not their own, not their
+ * `class:` sourceItem, not the only spellcasting class. They cannot be added (which list?), so the sync
+ * says so, and their names are protected from removal in every class.
+ */
+export function unattributablePicks(rows: FoundrySpellRow[], options: SpellClassification): FoundrySpellRow[] {
+  const onlyClass = options.knownCasterClassIds.size === 1;
+  return rows.filter((r) =>
+    (r.definitionId === null || r.definitionId === undefined)
+    && !isGrantedSpellRow(r)
+    && !rowClassId(r, options.classIdByIdentifier)
+    && !onlyClass);
 }
 
 const GRANT_LOOKUPS = new Set(["race", "feat", "classFeature", "background", "item"]);
@@ -411,7 +444,7 @@ export function classifyFoundrySpells(rows: FoundrySpellRow[], options: SpellCla
   const attributed = attributeSpellsToClass(
     rows.map((r) => ({
       definitionId: r.definitionId,
-      characterClassId: r.characterClassId as number,
+      characterClassId: rowClassId(r, options.classIdByIdentifier) as number,
       entityTypeId: r.entityTypeId,
       entryId: r.entryId,
       name: r.name,
