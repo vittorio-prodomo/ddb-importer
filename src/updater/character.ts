@@ -5,7 +5,8 @@ import { getActorConditionStates, getCondition } from "../parser/character/condi
 import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
 import {
-  diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, membershipIsPreparation, pactSlotsUsed, resolveDefinitionsByName, classRulesEdition,
+  diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, membershipIsPreparation, pactSlotsUsed, resolveDefinitionsByName, listEntryEdition, spellPrepareInfo,
+  unattributablePicks, normalizeSpellName,
   resolveAdditionIds,
 } from "./spellSync";
 import type { ClassListEntry, FoundryKnownSpell, ResolvedAdditions } from "./spellSync";
@@ -565,7 +566,9 @@ async function updateSpellsPrepared(actor, spellPreparedData) {
   });
 }
 
-async function updateDDBSpellsPrepared(actor, spells) {
+// `ddbEntryIds`: item id → D&D Beyond's entry id for the spell, for a spell matched by name that carries
+// none of its own — see spellPrepareInfo.
+async function updateDDBSpellsPrepared(actor, spells, ddbEntryIds = new Map<string, number>()) {
   const promises = [];
 
   const preparedSpells = spells.filter((spell) =>
@@ -575,18 +578,14 @@ async function updateDDBSpellsPrepared(actor, spells) {
     && spell.flags.ddbimporter?.dndbeyond?.characterClassId
     && !spell.flags.ddbimporter.dndbeyond.granted,
   ).map((spell) => {
-    const spellPreparedData = {
-      spellInfo: {
-        spellId: spell.flags.ddbimporter.definitionId,
-        characterClassId: spell.flags.ddbimporter.dndbeyond.characterClassId,
-        entityTypeId: spell.flags.ddbimporter.entityTypeId,
-        id: spell.flags.ddbimporter.id,
-        prepared: spell.system.prepared === CONFIG.DND5E.spellPreparationStates.prepared.value,
-      },
-    };
-    logger.debug(`Updating spell prepared state for ${spell.name} to ${spellPreparedData.spellInfo.prepared}`);
-    return spellPreparedData;
-  });
+    const spellInfo = spellPrepareInfo(spell, ddbEntryIds.get(spell.id ?? spell._id), CONFIG.DND5E.spellPreparationStates.prepared.value);
+    if (!spellInfo) {
+      logger.warn(`Spell prepared state not synced for ${spell.name}: no D&D Beyond entry id`);
+      return null;
+    }
+    logger.debug(`Updating spell prepared state for ${spell.name} to ${spellInfo.prepared}`);
+    return { spellInfo };
+  }).filter((data) => data !== null);
 
   preparedSpells.forEach((spellPreparedData) => {
     promises.push(updateSpellsPrepared(actor, spellPreparedData));
@@ -629,6 +628,7 @@ async function fetchClassSpellList(actor, classDefinitionId: number): Promise<Cl
     }
     return data.data.map((e) => ({
       id: e.id, entityTypeId: e.entityTypeId, definitionId: e.definition?.id, name: e.definition?.name,
+      edition: listEntryEdition(e.definition),
     }));
   } catch (error) {
     logger.warn(`Spell list for class ${classDefinitionId} unavailable:`, error);
@@ -649,7 +649,7 @@ async function loadClassSpellLists(actor, ddbCharacter, classIds: Iterable<numbe
     // A whole-list class's list already came with the character.
     const catalogue: ClassListEntry[] = ((ddb.classSpells ?? []).find((c) => c.characterClassId === classId)?.alwaysKnownSpells ?? [])
       .filter((e) => e?.definition)
-      .map((e) => ({ id: e.id, entityTypeId: e.entityTypeId, definitionId: e.definition.id, name: e.definition.name }));
+      .map((e) => ({ id: e.id, entityTypeId: e.entityTypeId, definitionId: e.definition.id, name: e.definition.name, edition: listEntryEdition(e.definition) }));
     if (wanted && wanted.every((id) => catalogue.some((e) => e.definitionId === id))) {
       lists.set(classId, catalogue);
       continue;
@@ -750,11 +750,25 @@ async function spellsKnown(actor, ddbCharacter) {
   // Spells dragged in from the DDB compendium have no characterClassId; they are attributed
   // to the class in here, and granted spells — which also have none — are kept out of the
   // additions.
-  const classified = classifyFoundrySpells(foundryRows, {
+  // dnd5e stamps a dropped spell `sourceItem: "class:<identifier>"`; D&D Beyond's class name slugs to it.
+  const classIdByIdentifier = new Map<string, number>(ddbClasses
+    .filter((c) => c?.definition?.name)
+    .map((c) => [String(c.definition.name).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-"), Number(c.id)]));
+  const classification = {
     knownCasterClassIds,
     wholeListClassIds,
     membershipClassIds: membershipClassIds(ddbCharacter),
-  });
+    classIdByIdentifier,
+  };
+  const classified = classifyFoundrySpells(foundryRows, classification);
+
+  // A pick no class can be found for cannot be added; say so, and let no removal take its name.
+  const unattributable = unattributablePicks(foundryRows, classification);
+  for (const row of unattributable) {
+    logger.warn(`Spell addition refused for ${actor.name}: ${row.name} (no class)`, { row });
+    ui.notifications.warn(`DDB spell sync (${actor.name}): ${row.name} was not added on D&D Beyond — it cannot tell which of the character's classes learned it.`, { permanent: true });
+  }
+  const protectedNames = new Set(unattributable.map((row) => normalizeSpellName(row.name)));
 
   // A spell from another compendium (Player's Handbook, dnd5e's SRD, CPR) has no D&D Beyond id:
   // it is matched by name on its class's own list — see resolveDefinitionsByName.
@@ -764,12 +778,11 @@ async function spellsKnown(actor, ddbCharacter) {
   let foundrySpells = classified;
   if (namelessClassIds.length) {
     const lists = await loadClassSpellLists(actor, ddbCharacter, namelessClassIds);
-    const editions = new Map(namelessClassIds.map((id) => [id, classRulesEdition((ddbCharacter.source.ddb.character.classes ?? []).find((c) => c.id === id))]));
-    const byName = resolveDefinitionsByName(classified, lists, editions);
+    const byName = resolveDefinitionsByName(classified, lists);
     foundrySpells = byName.spells;
     for (const spell of byName.wrongEdition.filter((s) => s.learned !== false && !s.unpicked)) {
       logger.warn(`Spell addition refused for ${actor.name}: ${spell.name} (other edition)`, { spell });
-      ui.notifications.warn(`DDB spell sync (${actor.name}): ${spell.name} was not added on D&D Beyond — the ${spellClassName(ddbCharacter, spell.characterClassId)} spell list has a different version of it (2014 and 2024 spells share names): replace the sheet's copy with the ${editions.get(spell.characterClassId)} one.`, { permanent: true });
+      ui.notifications.warn(`DDB spell sync (${actor.name}): ${spell.name} was not added on D&D Beyond — the ${spellClassName(ddbCharacter, spell.characterClassId)} spell list has only the 2024 version of it (2014 and 2024 spells share names): replace the sheet's copy with the 2024 one.`, { permanent: true });
     }
     // Only a pick would have been an addition; a granted or unpicked row is not worth a warning.
     for (const spell of byName.unmatched.filter((s) => s.learned !== false && !s.unpicked && knownCasterClassIds.has(s.characterClassId))) {
@@ -785,6 +798,7 @@ async function spellsKnown(actor, ddbCharacter) {
     allowRemovals,
     removalCap: SPELL_REMOVAL_CAP,
     knownCasterClassIds,
+    protectedNames,
   });
 
   if (diff.aborted) {
@@ -828,6 +842,7 @@ async function spellsPrepared(actor, ddbCharacter) {
   // removes the spell instead. Sending the flag too would only fail on a spell that is
   // not on the list yet.
   const viaMembership = membershipClassIds(ddbCharacter);
+  const ddbEntryIds = new Map<string, number>();
 
   const preparedSpells = actor.items.filter((item) => {
     if (viaMembership.has(Number(item.flags.ddbimporter?.dndbeyond?.characterClassId))) return false;
@@ -842,10 +857,11 @@ async function spellsPrepared(actor, ddbCharacter) {
     const select = item.type === "spell"
       && item.system.method === "spell"
       && item.system.prepared !== spellMatch.system.prepared;
+    if (select && spellMatch.flags.ddbimporter?.id) ddbEntryIds.set(item.id, spellMatch.flags.ddbimporter.id);
     return spellMatch && select;
   });
 
-  const results = updateDDBSpellsPrepared(actor, preparedSpells);
+  const results = updateDDBSpellsPrepared(actor, preparedSpells, ddbEntryIds);
 
   return results;
 }

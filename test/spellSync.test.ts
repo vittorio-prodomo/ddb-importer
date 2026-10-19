@@ -566,28 +566,90 @@ test("classifyFoundrySpells carries the Foundry item id through", () => {
   assert.strictEqual(out[0].itemId, "abc123");
 });
 
-// ⚠️ Name alone is not enough: a 2014 copy of Grease is called "Grease" too. The row's rules
-// edition must be the class's (a 2014 class reads a D&D Beyond source id below 145).
-import { classRulesEdition } from "../src/updater/spellSync.ts";
+// ⚠️ Name alone is not enough: a 2014 copy of Grease is called "Grease" too. Each LIST ENTRY says its own
+// edition (review I4): the 2024 Wizard list holds 2024-book spells, older-book spells with no 2024 version
+// (valid in 2024 — Xanathar's and the like), and for three spells both a legacy and a current version.
+import { listEntryEdition } from "../src/updater/spellSync.ts";
 
-test("a class whose D&D Beyond source is a 2014 book is a 2014 class", () => {
-  assert.strictEqual(classRulesEdition({ definition: { sources: [{ sourceId: 1 }] } }), "2014");
-  assert.strictEqual(classRulesEdition({ definition: { sources: [{ sourceId: 145 }] } }), "2024");
-  assert.strictEqual(classRulesEdition(undefined), "2024");
+test("a list entry's edition comes from D&D Beyond's own definition", () => {
+  assert.strictEqual(listEntryEdition({ isLegacy: true, sources: [{ sourceId: 4 }] }), "legacy");
+  assert.strictEqual(listEntryEdition({ isLegacy: false, sources: [{ sourceId: 27 }] }), "older");
+  assert.strictEqual(listEntryEdition({ isLegacy: false, sources: [{ sourceId: 145 }] }), "2024");
+  assert.strictEqual(listEntryEdition({}), "2024");
 });
 
-test("a 2014 copy is not matched on a 2024 class's list, and is reported as the other edition", () => {
-  const spell = fSpell(null as any, { name: "Grease", rules: "2014" });
-  const out = resolveDefinitionsByName([spell], WIZ_LIST, new Map([[WIZARD, "2024"]]));
+const EDITIONED = new Map([[WIZARD, [
+  { id: 1, entityTypeId: 9, definitionId: 2618957, name: "Grease", edition: "2024" as const },
+  { id: 2, entityTypeId: 9, definitionId: 1000, name: "Toll the Dead", edition: "older" as const },
+  { id: 3, entityTypeId: 9, definitionId: 2001, name: "Ice Knife", edition: "legacy" as const },
+  { id: 4, entityTypeId: 9, definitionId: 2002, name: "Ice Knife", edition: "2024" as const },
+]]]);
+const pick = (name: string, rules?: string) => resolveDefinitionsByName([fSpell(null as any, { name, rules })], EDITIONED);
+
+test("a 2014 copy of a spell the list holds only in its 2024 version is refused as the other version", () => {
+  const out = pick("Grease", "2014");
   assert.strictEqual(out.spells[0].definitionId, null);
-  assert.deepStrictEqual(out.wrongEdition, [spell]);
+  assert.strictEqual(out.wrongEdition.length, 1);
   assert.deepStrictEqual(out.unmatched, []);
 });
 
-test("a 2024 copy, or one that does not say, is matched on a 2024 class's list", () => {
-  const editions = new Map([[WIZARD, "2024" as const]]);
-  for (const rules of ["2024", undefined]) {
-    const out = resolveDefinitionsByName([fSpell(null as any, { name: "Grease", rules })], WIZ_LIST, editions);
-    assert.strictEqual(out.spells[0].definitionId, 2618957);
-  }
+test("a 2014 copy of an older-book spell with no 2024 version is matched", () => {
+  assert.strictEqual(pick("Toll the Dead", "2014").spells[0].definitionId, 1000);
+});
+
+test("a spell with both versions on the list: each copy gets its own", () => {
+  assert.strictEqual(pick("Ice Knife", "2014").spells[0].definitionId, 2001);
+  assert.strictEqual(pick("Ice Knife", "2024").spells[0].definitionId, 2002);
+  assert.strictEqual(pick("Ice Knife").spells[0].definitionId, 2002);
+});
+
+test("a 2014 copy of a spell the list does not hold at all is 'not on the list', not 'other version'", () => {
+  const out = pick("Cure Wounds", "2014");
+  assert.strictEqual(out.unmatched.length, 1);
+  assert.deepStrictEqual(out.wrongEdition, []);
+});
+
+// ⚠️ A spell matched by name is stamped with its definition but not with D&D Beyond's ENTRY id (the add's
+// answer does not carry it). The prepared-state sync must take the entry id from D&D Beyond's own row, and
+// never send `id: undefined` (review I3, 2026-10-19).
+import { spellPrepareInfo } from "../src/updater/spellSync.ts";
+
+const prepSpell = (id?: number) => ({
+  system: { prepared: 1 },
+  flags: { ddbimporter: { definitionId: 2618957, entityTypeId: 435869154, ...(id ? { id } : {}), dndbeyond: { characterClassId: WIZARD } } },
+});
+
+test("the prepare call uses the item's own entry id when it has one", () => {
+  assert.deepStrictEqual(spellPrepareInfo(prepSpell(555), 777, 1), { spellId: 2618957, characterClassId: WIZARD, entityTypeId: 435869154, id: 555, prepared: true });
+});
+
+test("a stamped spell without an entry id takes D&D Beyond's row's id", () => {
+  assert.strictEqual(spellPrepareInfo(prepSpell(), 777, 1)?.id, 777);
+});
+
+test("with no entry id anywhere, no prepare call is built", () => {
+  assert.strictEqual(spellPrepareInfo(prepSpell(), undefined, 1), null);
+});
+
+// ⚠️ On a multiclass sheet a spell from another compendium has no class id, and the single-class
+// attribution cannot give it one — it used to be dropped before the diff: never sent, never warned
+// about, and unable to keep a same-named D&D Beyond spell from being removed (review I2).
+import { unattributablePicks } from "../src/updater/spellSync.ts";
+
+const dropRow = (over = {}) => ({ definitionId: null, characterClassId: null, entityTypeId: 1, entryId: null, name: "Grease", prepared: 0, sourceItem: "class:wizard", lookup: null, ...over });
+const MULTI = { knownCasterClassIds: new Set([WIZARD, SORCERER]), wholeListClassIds: new Set<number>() };
+
+test("on a multiclass sheet, a dropped spell is given the class dnd5e stamped on it", () => {
+  const out = classifyFoundrySpells([dropRow()], { ...MULTI, classIdByIdentifier: new Map([["wizard", WIZARD], ["sorcerer", SORCERER]]) });
+  assert.strictEqual(out[0]?.characterClassId, WIZARD);
+});
+
+test("a pick no class can be found for is reported", () => {
+  const rows = [dropRow({ sourceItem: null }), dropRow({ name: "Shield", sourceItem: "feat:magic-initiate" }), dropRow({ name: "Bless", definitionId: 5 })];
+  assert.deepStrictEqual(unattributablePicks(rows, { ...MULTI, classIdByIdentifier: new Map([["wizard", WIZARD]]) }).map((r) => r.name), ["Grease"]);
+});
+
+test("a protected name keeps a D&D Beyond spell of ANY class from being removed", () => {
+  const diff = diffKnownSpells([], [dSpell(2618957, { name: "Grease" }), dSpell(3, { name: "Sleep", characterClassId: SORCERER })], { ...OPTS, protectedNames: new Set(["grease"]) });
+  assert.deepStrictEqual(diff.toRemove.map((s) => s.name), ["Sleep"]);
 });
