@@ -5,7 +5,7 @@ import { getActorConditionStates, getCondition } from "../parser/character/condi
 import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
 import {
-  diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, membershipIsPreparation, pactSlotsUsed, resolveDefinitionsByName, classRulesEdition, spellPrepareInfo,
+  diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, membershipIsPreparation, pactSlotsUsed, resolveDefinitionsByName, listEntryEdition, spellPrepareInfo,
   resolveAdditionIds,
 } from "./spellSync";
 import type { ClassListEntry, FoundryKnownSpell, ResolvedAdditions } from "./spellSync";
@@ -627,6 +627,7 @@ async function fetchClassSpellList(actor, classDefinitionId: number): Promise<Cl
     }
     return data.data.map((e) => ({
       id: e.id, entityTypeId: e.entityTypeId, definitionId: e.definition?.id, name: e.definition?.name,
+      edition: listEntryEdition(e.definition),
     }));
   } catch (error) {
     logger.warn(`Spell list for class ${classDefinitionId} unavailable:`, error);
@@ -647,7 +648,7 @@ async function loadClassSpellLists(actor, ddbCharacter, classIds: Iterable<numbe
     // A whole-list class's list already came with the character.
     const catalogue: ClassListEntry[] = ((ddb.classSpells ?? []).find((c) => c.characterClassId === classId)?.alwaysKnownSpells ?? [])
       .filter((e) => e?.definition)
-      .map((e) => ({ id: e.id, entityTypeId: e.entityTypeId, definitionId: e.definition.id, name: e.definition.name }));
+      .map((e) => ({ id: e.id, entityTypeId: e.entityTypeId, definitionId: e.definition.id, name: e.definition.name, edition: listEntryEdition(e.definition) }));
     if (wanted && wanted.every((id) => catalogue.some((e) => e.definitionId === id))) {
       lists.set(classId, catalogue);
       continue;
@@ -762,12 +763,11 @@ async function spellsKnown(actor, ddbCharacter) {
   let foundrySpells = classified;
   if (namelessClassIds.length) {
     const lists = await loadClassSpellLists(actor, ddbCharacter, namelessClassIds);
-    const editions = new Map(namelessClassIds.map((id) => [id, classRulesEdition((ddbCharacter.source.ddb.character.classes ?? []).find((c) => c.id === id))]));
-    const byName = resolveDefinitionsByName(classified, lists, editions);
+    const byName = resolveDefinitionsByName(classified, lists);
     foundrySpells = byName.spells;
     for (const spell of byName.wrongEdition.filter((s) => s.learned !== false && !s.unpicked)) {
       logger.warn(`Spell addition refused for ${actor.name}: ${spell.name} (other edition)`, { spell });
-      ui.notifications.warn(`DDB spell sync (${actor.name}): ${spell.name} was not added on D&D Beyond — the ${spellClassName(ddbCharacter, spell.characterClassId)} spell list has a different version of it (2014 and 2024 spells share names): replace the sheet's copy with the ${editions.get(spell.characterClassId)} one.`, { permanent: true });
+      ui.notifications.warn(`DDB spell sync (${actor.name}): ${spell.name} was not added on D&D Beyond — the ${spellClassName(ddbCharacter, spell.characterClassId)} spell list has only the 2024 version of it (2014 and 2024 spells share names): replace the sheet's copy with the 2024 one.`, { permanent: true });
     }
     // Only a pick would have been an addition; a granted or unpicked row is not worth a warning.
     for (const spell of byName.unmatched.filter((s) => s.learned !== false && !s.unpicked && knownCasterClassIds.has(s.characterClassId))) {

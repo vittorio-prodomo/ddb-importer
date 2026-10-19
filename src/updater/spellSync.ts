@@ -126,6 +126,23 @@ export interface ClassListEntry {
   entityTypeId: number;
   definitionId: number;
   name: string;
+  /** See listEntryEdition. Absent = treated as "2024". */
+  edition?: ListEntryEdition;
+}
+
+/**
+ * A class list entry's edition, from D&D Beyond's own definition:
+ *  - "legacy": the 2014 version of a spell that also has a 2024 one (D&D Beyond's `isLegacy`);
+ *  - "older":  a spell from an older book with no 2024 version — valid under both rule sets;
+ *  - "2024":   a 2024-book spell.
+ * ⚠️ A 2024 class's list holds all three: the 2024 Wizard list has 250 / 35 / 3 (2026-10-19).
+ */
+export type ListEntryEdition = "legacy" | "older" | "2024";
+
+export function listEntryEdition(definition: { isLegacy?: boolean; sources?: { sourceId?: number }[] } | null | undefined): ListEntryEdition {
+  if (definition?.isLegacy) return "legacy";
+  const ids = (definition?.sources ?? []).map((s) => s.sourceId).filter((id): id is number => Number.isInteger(id));
+  return ids.length && ids.every((id) => id < 145) ? "older" : "2024";
 }
 
 /**
@@ -196,24 +213,26 @@ export function normalizeSpellName(name: string | null | undefined): string {
 export function resolveDefinitionsByName(
   spells: FoundryKnownSpell[],
   listsByClassId: Map<number, ClassListEntry[] | null | undefined>,
-  editionByClassId = new Map<number, "2014" | "2024">(),
 ): { spells: FoundryKnownSpell[]; unmatched: FoundryKnownSpell[]; wrongEdition: FoundryKnownSpell[] } {
   const unmatched: FoundryKnownSpell[] = [];
   const wrongEdition: FoundryKnownSpell[] = [];
   const out = spells.map((spell) => {
     if (spell.definitionId !== null && spell.definitionId !== undefined) return spell;
-    // ⚠️ Name alone is not enough: the 2014 copy of a spell has the same name. A row that says
-    // its edition must be the class's; one that does not say is taken as the class's.
-    const edition = spell.characterClassId ? editionByClassId.get(spell.characterClassId) : undefined;
-    if (edition && (spell.rules === "2014" || spell.rules === "2024") && spell.rules !== edition) {
-      wrongEdition.push(spell);
-      return spell;
-    }
     const list = spell.characterClassId ? listsByClassId.get(spell.characterClassId) : null;
     const name = normalizeSpellName(spell.name);
-    const entry = list && name ? list.find((e) => normalizeSpellName(e.name) === name) : undefined;
-    if (!entry) {
+    const named = list && name ? list.filter((e) => normalizeSpellName(e.name) === name) : [];
+    if (!named.length) {
       unmatched.push(spell);
+      return spell;
+    }
+    // ⚠️ Name alone is not enough: a 2014 copy of a spell has the same name. A 2014 copy takes the
+    // legacy entry or an older-book spell; a 2024 copy (or one that does not say) the current one.
+    const edition = (e: ClassListEntry) => e.edition ?? "2024";
+    const entry = spell.rules === "2014"
+      ? named.find((e) => edition(e) === "legacy") ?? named.find((e) => edition(e) === "older")
+      : named.find((e) => edition(e) === "2024") ?? named.find((e) => edition(e) === "older") ?? named[0];
+    if (!entry) {
+      wrongEdition.push(spell);
       return spell;
     }
     return { ...spell, definitionId: entry.definitionId, entityTypeId: entry.entityTypeId ?? spell.entityTypeId, matchedByName: true };
