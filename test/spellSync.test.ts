@@ -653,3 +653,37 @@ test("a protected name keeps a D&D Beyond spell of ANY class from being removed"
   const diff = diffKnownSpells([], [dSpell(2618957, { name: "Grease" }), dSpell(3, { name: "Sleep", characterClassId: SORCERER })], { ...OPTS, protectedNames: new Set(["grease"]) });
   assert.deepStrictEqual(diff.toRemove.map((s) => s.name), ["Sleep"]);
 });
+
+// ── T128 deferred minors ──────────────────────────────────────────────────────────────────────────
+import { spellSyncWarning } from "../src/updater/spellSync.ts";
+
+test("minor 4: an UNPICKED definition-less row does not keep a D&D Beyond pick from being removed", () => {
+  const diff = diffKnownSpells([fSpell(null as any, { name: "Grease", unpicked: true })], [dSpell(2618957, { name: "Grease" })], OPTS);
+  assert.deepStrictEqual(diff.toRemove.map((s) => s.name), ["Grease"]);
+});
+
+test("minor 8: names are compared with one kind of apostrophe and single spaces on both sides", () => {
+  assert.strictEqual(normalizeSpellName("Hunter’s   Mark"), "hunter's mark");
+  const list = new Map([[WIZARD, [{ id: 1, entityTypeId: 9, definitionId: 99, name: "Hunter's Mark" }]]]);
+  const out = resolveAdditionIds([fSpell(42, { name: "Hunter’s Mark", entryId: null })], list);
+  assert.strictEqual(out.refused[0]?.reason, "other-version");
+});
+
+const esc = (s: string) => s.replace(/</g, "&lt;");
+
+test("minor 3: a not-on-the-list warning names the way to silence it for good", () => {
+  const msg = spellSyncWarning("not-on-list", { actorName: "Nahuel", spellName: "Zzz", className: "Wizard" }, esc);
+  assert.match(msg, /Zzz was not added on D&D Beyond — it is not on the Wizard spell list there/);
+  assert.match(msg, /Ignore this item when updating the character back to DDB/);
+});
+
+test("minor 6: names in a warning are escaped", () => {
+  const msg = spellSyncWarning("no-class", { actorName: "<b>Nahuel</b>", spellName: "<i>Grease</i>", className: "" }, esc);
+  assert.ok(!msg.includes("<b>") && !msg.includes("<i>"), msg);
+});
+
+test("every warning kind has its own wording", () => {
+  const kinds = ["not-on-list", "no-list", "other-version", "only-2024", "no-class"] as const;
+  const texts = kinds.map((k) => spellSyncWarning(k, { actorName: "A", spellName: "S", className: "Wizard" }, esc));
+  assert.strictEqual(new Set(texts).size, kinds.length);
+});
