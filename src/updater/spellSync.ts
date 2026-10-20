@@ -101,7 +101,9 @@ export function diffKnownSpells(
   // name) still holds the spell: a same-named D&D Beyond spell of that class is not removed.
   const namelessKeys = new Set(
     foundrySpells
-      .filter((s) => (s.definitionId === null || s.definitionId === undefined) && knownCasterClassIds.has(s.characterClassId))
+      // An unpicked row (a 2024 Ranger's / Paladin's unprepared list row) holds nothing — the player let it go.
+      .filter((s) => (s.definitionId === null || s.definitionId === undefined) && !s.unpicked
+        && knownCasterClassIds.has(s.characterClassId))
       .map((s) => `${s.characterClassId}:${normalizeSpellName(s.name)}`),
   );
 
@@ -196,8 +198,8 @@ export function resolveAdditionIds(
       out.resolved.push({ ...spell, entryId: entry.id, entityTypeId: entry.entityTypeId ?? spell.entityTypeId });
       continue;
     }
-    const name = String(spell.name ?? "").trim().toLowerCase();
-    const sameName = name !== "" && list.some((e) => String(e.name ?? "").trim().toLowerCase() === name);
+    const name = normalizeSpellName(spell.name);
+    const sameName = name !== "" && list.some((e) => normalizeSpellName(e.name) === name);
     out.refused.push({ spell, reason: sameName ? "other-version" : "not-on-list" });
   }
 
@@ -206,7 +208,7 @@ export function resolveAdditionIds(
 
 /** A spell name as D&D Beyond and Foundry can both spell it: trimmed, lower case, one kind of apostrophe. */
 export function normalizeSpellName(name: string | null | undefined): string {
-  return String(name ?? "").trim().toLowerCase().replace(/[\u2018\u2019]/g, "'");
+  return String(name ?? "").trim().toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, " ");
 }
 
 /**
@@ -510,4 +512,28 @@ export function spellPrepareInfo(
     id,
     prepared: spell.system?.prepared === preparedValue,
   };
+}
+
+export type SpellSyncWarningKind = "not-on-list" | "no-list" | "other-version" | "only-2024" | "no-class";
+
+/**
+ * The warning the sync raises when a spell picked in Foundry is not added on D&D Beyond. Names go
+ * through `escape` (`foundry.utils.escapeHTML` in the sync): notifications render markup.
+ */
+export function spellSyncWarning(
+  kind: SpellSyncWarningKind,
+  names: { actorName: string; spellName: string; className: string },
+  escape: (text: string) => string,
+): string {
+  const actor = escape(String(names.actorName ?? ""));
+  const spell = escape(String(names.spellName ?? ""));
+  const list = `${escape(String(names.className || "class"))} spell list`;
+  const why = {
+    "not-on-list": `it is not on the ${list} there. If it never should be, tick "Ignore this item when updating the character back to DDB" in the item's D&D Beyond Importer settings`,
+    "no-list": `the ${list} could not be read from the proxy`,
+    "other-version": `the ${list} has a different version of it (2014 and 2024 spells share names): replace the sheet's copy with the other one from the DDB Spells compendium`,
+    "only-2024": `the ${list} has only the 2024 version of it (2014 and 2024 spells share names): replace the sheet's copy with the 2024 one`,
+    "no-class": "it cannot tell which of the character's classes learned it",
+  }[kind];
+  return `DDB spell sync (${actor}): ${spell} was not added on D&D Beyond — ${why}.`;
 }

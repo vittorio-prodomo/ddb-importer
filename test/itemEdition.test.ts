@@ -30,3 +30,20 @@ test("only the entries of the wanted edition are offered to the name match", () 
 test("an index holding nothing of the wanted edition is returned whole", () => {
   assert.deepStrictEqual(entriesInEdition([potion2014, noRules], "2024"), [potion2014, noRules]);
 });
+
+// Minor 5 (T128 review): exact matches everywhere before any loose match — a loose match inside the
+// item's edition must not win over an exact match in the other edition.
+import { matchAttempts } from "../src/updater/itemEdition.ts";
+
+test("exact in the edition, exact anywhere, then loose in the edition, then loose anywhere", () => {
+  const subset = [potion2024];
+  const all = [potion2014, potion2024];
+  assert.deepStrictEqual(matchAttempts(subset, all), [
+    { index: subset, loose: false }, { index: all, loose: false }, { index: subset, loose: true }, { index: all, loose: true },
+  ]);
+});
+
+test("when the edition subset IS the whole index, each pass runs once", () => {
+  const all = [potion2014];
+  assert.deepStrictEqual(matchAttempts(all, all), [{ index: all, loose: false }, { index: all, loose: true }]);
+});

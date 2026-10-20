@@ -20,5 +20,21 @@ export function itemRulesEdition(item: HasRules, worldRulesVersion: string): Edi
 /** The index entries of `edition`; the whole index when it holds none of that edition. */
 export function entriesInEdition<T extends HasRules>(index: T[], edition: Edition): T[] {
   const same = index.filter((entry) => entry?.system?.source?.rules === edition);
+  // The same array when nothing matches, so matchAttempts can tell there is no subset.
   return same.length ? same : index;
+}
+
+/**
+ * The order the name matcher is tried in: an exact match anywhere beats a loose one, and within each
+ * kind the item's own edition comes first. A loose match inside the edition used to win over an exact
+ * match in the other edition (T128 review, minor 5).
+ */
+export function matchAttempts<T>(subset: T[], all: T[]): { index: T[]; loose: boolean }[] {
+  const same = subset === all;
+  return [
+    { index: subset, loose: false },
+    ...(same ? [] : [{ index: all, loose: false }]),
+    { index: subset, loose: true },
+    ...(same ? [] : [{ index: all, loose: true }]),
+  ];
 }

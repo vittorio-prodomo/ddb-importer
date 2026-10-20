@@ -6,15 +6,15 @@ import DDBCharacter from "../parser/DDBCharacter";
 import DDBPartyInventory from "../muncher/DDBPartyInventory";
 import {
   diffKnownSpells, buildSpellSyncCalls, classifyFoundrySpells, preparesFromWholeList, membershipIsPreparation, pactSlotsUsed, resolveDefinitionsByName, listEntryEdition, spellPrepareInfo,
-  unattributablePicks, normalizeSpellName,
+  unattributablePicks, normalizeSpellName, spellSyncWarning,
   resolveAdditionIds,
 } from "./spellSync";
-import type { ClassListEntry, FoundryKnownSpell, ResolvedAdditions } from "./spellSync";
+import type { ClassListEntry, FoundryKnownSpell, ResolvedAdditions, SpellSyncWarningKind } from "./spellSync";
 import { arcaneWardUses, diffActionUses, diffSpellUses, grantingFeature } from "./actionSync";
 import { diffHitDice } from "./hitDiceSync";
 import { addedCustomItemDefinitionId, changedCustomItems, customItemEntryFlags, findCustomItemEntry } from "./customItemSync";
 import { runInSequence } from "./sequence";
-import { entriesInEdition, itemRulesEdition } from "./itemEdition";
+import { entriesInEdition, itemRulesEdition, matchAttempts } from "./itemEdition";
 
 const CHARACTER_CONTAINER_ENTITY_TYPE_ID = 1581111423;
 const PARTY_CONTAINER_ENTITY_TYPE_ID = DDBPartyInventory.PARTY_CONTAINER_ENTITY_TYPE_ID;
@@ -123,13 +123,16 @@ async function getUpdateItemIndex() {
   return itemIndex;
 }
 
-// Same name AND same rules edition first — see itemEdition.ts; the whole index only when the
-// item's edition has no match there.
+// Exact before loose, and the item's own rules edition first within each — see itemEdition.ts.
 async function getCompendiumItemInfo(item) {
   const index = await getUpdateItemIndex();
   const edition = itemRulesEdition(item, game.settings.get("dnd5e", "rulesVersion" as never) as unknown as string);
-  return NameMatcher.looseItemNameMatch(item, entriesInEdition(Array.from(index as any[]), edition), true, false, true)
-    ?? NameMatcher.looseItemNameMatch(item, index, true, false, true);
+  const all = Array.from(index as any[]);
+  for (const attempt of matchAttempts(entriesInEdition(all, edition), all)) {
+    const match = NameMatcher.looseItemNameMatch(item, attempt.index, attempt.loose, false, true);
+    if (match) return match;
+  }
+  return undefined;
 }
 
 // flavor is just useful for debugging
@@ -665,25 +668,32 @@ async function loadClassSpellLists(actor, ddbCharacter, classIds: Iterable<numbe
 const spellClassName = (ddbCharacter, classId: number) =>
   (ddbCharacter.source.ddb.character.classes ?? []).find((c) => c.id === classId)?.definition?.name ?? "class";
 
+// Every "not added on D&D Beyond" warning, one wording per reason (spellSyncWarning), names escaped.
+function warnSpellNotAdded(actor, ddbCharacter, spell: { name: string; characterClassId?: number | null }, kind: SpellSyncWarningKind) {
+  logger.warn(`Spell addition refused for ${actor.name}: ${spell.name} (${kind})`, { spell });
+  const className = spell.characterClassId ? spellClassName(ddbCharacter, spell.characterClassId) : "";
+  ui.notifications.warn(spellSyncWarning(kind, { actorName: actor.name, spellName: spell.name, className }, foundry.utils.escapeHTML), { permanent: true });
+}
+
 // Additions get their id from the class's own spell list, never from the Foundry item —
 // see resolveAdditionIds. Anything the list does not hold is refused, and said out loud.
-async function resolveSpellAdditions(actor, ddbCharacter, toAdd: FoundryKnownSpell[]): Promise<ResolvedAdditions> {
+// `preloaded`: lists already read in this sync (the name matching reads them first) — a class whose list
+// is there and holds every wanted spell is not fetched again.
+async function resolveSpellAdditions(actor, ddbCharacter, toAdd: FoundryKnownSpell[], preloaded = new Map<number, ClassListEntry[] | null>()): Promise<ResolvedAdditions> {
   if (toAdd.length === 0) return { resolved: [], refused: [] };
   const wantedByClass = new Map<number, number[]>();
   for (const s of toAdd) wantedByClass.set(s.characterClassId, [...(wantedByClass.get(s.characterClassId) ?? []), s.definitionId as number]);
-  const lists = await loadClassSpellLists(actor, ddbCharacter, wantedByClass.keys(), wantedByClass);
+  const lists = new Map<number, ClassListEntry[] | null>();
+  const toLoad: number[] = [];
+  for (const [classId, wanted] of wantedByClass) {
+    const known = preloaded.get(classId);
+    if (known && wanted.every((id) => known.some((e) => e.definitionId === id))) lists.set(classId, known);
+    else toLoad.push(classId);
+  }
+  if (toLoad.length) for (const [classId, list] of await loadClassSpellLists(actor, ddbCharacter, toLoad, wantedByClass)) lists.set(classId, list);
 
   const result = resolveAdditionIds(toAdd, lists);
-  for (const { spell, reason } of result.refused) {
-    const list = `${spellClassName(ddbCharacter, spell.characterClassId)} spell list`;
-    const why = {
-      "no-list": `the ${list} could not be read from the proxy`,
-      "other-version": `the ${list} has a different version of it (2014 and 2024 spells share names): replace the sheet's copy with the other one from the DDB Spells compendium`,
-      "not-on-list": `it is not on the ${list}`,
-    }[reason];
-    logger.warn(`Spell addition refused for ${actor.name}: ${spell.name} (${reason})`, { spell });
-    ui.notifications.warn(`DDB spell sync (${actor.name}): ${spell.name} was not added on D&D Beyond — ${why}.`, { permanent: true });
-  }
+  for (const { spell, reason } of result.refused) warnSpellNotAdded(actor, ddbCharacter, spell, reason);
   return result;
 }
 
@@ -727,8 +737,8 @@ async function spellsKnown(actor, ddbCharacter) {
       .map((cls) => Number(cls.characterClassId)),
   );
 
-  // Anything without a DDB definition id was never a DDB spell (hand-made, or added by
-  // Chris's Premades) and must stay invisible to this diff.
+  // A row without a DDB definition id comes from another compendium (or is hand-made): it is matched
+  // by name on its class's list below (resolveDefinitionsByName), or warned about.
   // ⚠️ `prepared` is read here although getFoundryItems returns SOURCE data: it is a plain
   // stored number on a spell, not a derived value.
   const foundryRows = getFoundryItems(actor)
@@ -764,33 +774,27 @@ async function spellsKnown(actor, ddbCharacter) {
 
   // A pick no class can be found for cannot be added; say so, and let no removal take its name.
   const unattributable = unattributablePicks(foundryRows, classification);
-  for (const row of unattributable) {
-    logger.warn(`Spell addition refused for ${actor.name}: ${row.name} (no class)`, { row });
-    ui.notifications.warn(`DDB spell sync (${actor.name}): ${row.name} was not added on D&D Beyond — it cannot tell which of the character's classes learned it.`, { permanent: true });
-  }
+  for (const row of unattributable) warnSpellNotAdded(actor, ddbCharacter, { name: row.name }, "no-class");
   const protectedNames = new Set(unattributable.map((row) => normalizeSpellName(row.name)));
 
   // A spell from another compendium (Player's Handbook, dnd5e's SRD, CPR) has no D&D Beyond id:
   // it is matched by name on its class's own list — see resolveDefinitionsByName.
+  // Only a pick would become an addition: a granted or unpicked row is not worth reading a list for.
   const namelessClassIds = classified
-    .filter((s) => (s.definitionId === null || s.definitionId === undefined) && knownCasterClassIds.has(s.characterClassId))
+    .filter((s) => (s.definitionId === null || s.definitionId === undefined) && s.learned !== false && !s.unpicked
+      && knownCasterClassIds.has(s.characterClassId))
     .map((s) => s.characterClassId);
   let foundrySpells = classified;
+  let loadedLists = new Map<number, ClassListEntry[] | null>();
   if (namelessClassIds.length) {
     const lists = await loadClassSpellLists(actor, ddbCharacter, namelessClassIds);
+    loadedLists = lists;
     const byName = resolveDefinitionsByName(classified, lists);
     foundrySpells = byName.spells;
-    for (const spell of byName.wrongEdition.filter((s) => s.learned !== false && !s.unpicked)) {
-      logger.warn(`Spell addition refused for ${actor.name}: ${spell.name} (other edition)`, { spell });
-      ui.notifications.warn(`DDB spell sync (${actor.name}): ${spell.name} was not added on D&D Beyond — the ${spellClassName(ddbCharacter, spell.characterClassId)} spell list has only the 2024 version of it (2014 and 2024 spells share names): replace the sheet's copy with the 2024 one.`, { permanent: true });
-    }
+    for (const spell of byName.wrongEdition.filter((s) => s.learned !== false && !s.unpicked)) warnSpellNotAdded(actor, ddbCharacter, spell, "only-2024");
     // Only a pick would have been an addition; a granted or unpicked row is not worth a warning.
     for (const spell of byName.unmatched.filter((s) => s.learned !== false && !s.unpicked && knownCasterClassIds.has(s.characterClassId))) {
-      const why = lists.get(spell.characterClassId)
-        ? `it is not on the ${spellClassName(ddbCharacter, spell.characterClassId)} spell list there`
-        : `the ${spellClassName(ddbCharacter, spell.characterClassId)} spell list could not be read from the proxy`;
-      logger.warn(`Spell addition refused for ${actor.name}: ${spell.name} (not matched by name)`, { spell });
-      ui.notifications.warn(`DDB spell sync (${actor.name}): ${spell.name} was not added on D&D Beyond — ${why}.`, { permanent: true });
+      warnSpellNotAdded(actor, ddbCharacter, spell, lists.get(spell.characterClassId) ? "not-on-list" : "no-list");
     }
   }
 
@@ -807,7 +811,7 @@ async function spellsKnown(actor, ddbCharacter) {
     return [];
   }
 
-  const additions = await resolveSpellAdditions(actor, ddbCharacter, diff.toAdd);
+  const additions = await resolveSpellAdditions(actor, ddbCharacter, diff.toAdd, loadedLists);
   const calls = buildSpellSyncCalls({ ...diff, toAdd: additions.resolved });
   logger.debug(`Spell sync for ${actor.name}`, {
     adds: additions.resolved.length, refused: additions.refused.length, removes: diff.toRemove.length,
